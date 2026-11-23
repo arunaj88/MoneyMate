@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "218253682854",
+    "project_id": "moneymate-bd30c",
+    "storage_bucket": "moneymate-bd30c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:218253682854:android:bc5ac291850610b5c22c67",
+        "android_client_info": {
+          "package_name": "com.example.money_mate"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "218253682854-1vivavlplo742m7a8c27cclvink0d9o2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.money_mate",
+            "certificate_hash": "201143563908889e7f5bbb9d95c884b8fc912758"
+          }
+        },
+        {
+          "client_id": "218253682854-uq2i43ephfcmphj39avcqja16f30edmc.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD6V8mm0Nj791DHpnY8fwRMy1z8xRaIBMY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "218253682854-uq2i43ephfcmphj39avcqja16f30edmc.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "218253682854-guem24b56h762nv9ussfvsm50pguo5op.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.moneyMate"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
