@@ -1,0 +1,224 @@
+rules_version = '2';
+
+// MoneyMate security rules.
+//
+// Personal data:  users/{uid}/transactions | personalBudgets | personalCategories
+//                 Only the signed-in owner can read or write it.
+// Shared data:    households/{householdId}/transactions | budgets | categories | settings
+//                 Only verified active members (checked against
+//                 households/{householdId}/members/{uid}) can read or write it.
+// Membership:     households, members, invitations, users/{uid}/memberships and
+//                 invitationCodes are written only by Cloud Functions (admin),
+//                 so nobody can add themselves to a household, change a role or
+//                 accept an invitation from the client.
+//
+// Records are never hard-deleted by clients (deletions are soft, with
+// `deleted: true`), so client deletes are rejected everywhere.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ------------------------------------------------------------ helpers
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isUser(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function memberDoc(householdId) {
+      return /databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid);
+    }
+
+    function isActiveMember(householdId) {
+      return signedIn()
+        && exists(memberDoc(householdId))
+        && get(memberDoc(householdId)).data.status == 'active';
+    }
+
+    function isOwner(householdId) {
+      return isActiveMember(householdId)
+        && get(memberDoc(householdId)).data.role == 'owner';
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function optionalString(data, field, maxSize) {
+      return !(field in data)
+        || data[field] == null
+        || (data[field] is string && data[field].size() <= maxSize);
+    }
+
+    // Fields every transaction document must have, whatever its scope.
+    function validTransaction(transactionId) {
+      let d = incoming();
+      return d.id == transactionId
+        && d.amountMinor is int
+        && d.amountMinor > 0
+        && d.amountMinor <= 100000000000000
+        && d.type in ['income', 'expense']
+        && d.categoryId is string
+        && d.categoryId.size() > 0
+        && d.categoryId.size() <= 128
+        && d.date is int
+        && d.createdAt is int
+        && d.updatedAt is int
+        && d.deleted is bool
+        && (d.deleted == false || d.deletedAt is int)
+        && optionalString(d, 'note', 500)
+        && optionalString(d, 'paymentMethod', 32)
+        && d.serverUpdatedAt == request.time;
+    }
+
+    // Budget and category documents (small collections, last writer wins).
+    function validRecord(recordId) {
+      let d = incoming();
+      return d.id == recordId
+        && d.updatedAt is int
+        && d.deleted is bool
+        && d.serverUpdatedAt == request.time;
+    }
+
+    function validBudget(recordId) {
+      let d = incoming();
+      return validRecord(recordId)
+        && (d.deleted == true
+          || (d.kind in ['target', 'category']
+            && d.period in ['weekly', 'monthly']
+            && d.amountMinor is int
+            && d.amountMinor >= 0
+            && d.amountMinor <= 100000000000000
+            && (d.kind == 'target' || (d.categoryId is string && d.amountMinor > 0))));
+    }
+
+    function validCategory(recordId) {
+      let d = incoming();
+      return validRecord(recordId)
+        && (d.deleted == true
+          || (d.name is string
+            && d.name.size() > 0
+            && d.name.size() <= 60
+            && d.type in ['income', 'expense']));
+    }
+
+    // ------------------------------------------------------ personal data
+
+    match /users/{uid} {
+      // The user document holds `personalResetAt`, written by the
+      // resetPersonalData function, so the user's devices can drop copies
+      // of records deleted by a reset. Read-only for its owner.
+      allow read: if isUser(uid);
+      allow write: if false;
+
+      match /transactions/{transactionId} {
+        allow read: if isUser(uid);
+        allow create: if isUser(uid)
+          && validTransaction(transactionId)
+          && incoming().scope == 'personal'
+          && incoming().ownerUid == uid
+          && incoming().createdBy == uid
+          && !('householdId' in incoming());
+        // Updates keep the original creation time.
+        allow update: if isUser(uid)
+          && validTransaction(transactionId)
+          && incoming().scope == 'personal'
+          && incoming().ownerUid == uid
+          && incoming().createdBy == uid
+          && !('householdId' in incoming())
+          && incoming().createdAt == resource.data.createdAt;
+        allow delete: if false;
+      }
+
+      match /personalBudgets/{budgetId} {
+        allow read: if isUser(uid);
+        allow create, update: if isUser(uid) && validBudget(budgetId);
+        allow delete: if false;
+      }
+
+      match /personalCategories/{categoryId} {
+        allow read: if isUser(uid);
+        allow create, update: if isUser(uid) && validCategory(categoryId);
+        allow delete: if false;
+      }
+
+      // Written by Cloud Functions only.
+      match /memberships/{householdId} {
+        allow read: if isUser(uid);
+        allow write: if false;
+      }
+    }
+
+    // ------------------------------------------------------- households
+
+    match /households/{householdId} {
+      // Household documents, members and invitations: Cloud Functions only.
+      allow read: if isActiveMember(householdId);
+      allow write: if false;
+
+      match /members/{memberUid} {
+        allow read: if isActiveMember(householdId);
+        allow write: if false;
+      }
+
+      match /invitations/{invitationId} {
+        allow read: if isOwner(householdId);
+        allow write: if false;
+      }
+
+      match /transactions/{transactionId} {
+        allow read: if isActiveMember(householdId);
+        // The creator is recorded and must be the caller.
+        allow create: if isActiveMember(householdId)
+          && validTransaction(transactionId)
+          && incoming().scope == 'shared'
+          && incoming().householdId == householdId
+          && incoming().createdBy == request.auth.uid
+          && incoming().updatedBy == request.auth.uid
+          && !('ownerUid' in incoming());
+        // Any member may edit or soft-delete; the creator and creation time
+        // never change, and the editor is recorded.
+        allow update: if isActiveMember(householdId)
+          && validTransaction(transactionId)
+          && incoming().scope == 'shared'
+          && incoming().householdId == householdId
+          && incoming().createdBy == resource.data.createdBy
+          && incoming().createdAt == resource.data.createdAt
+          && incoming().updatedBy == request.auth.uid
+          && !('ownerUid' in incoming());
+        allow delete: if false;
+      }
+
+      match /budgets/{budgetId} {
+        allow read: if isActiveMember(householdId);
+        allow create, update: if isActiveMember(householdId)
+          && validBudget(budgetId)
+          && incoming().updatedBy == request.auth.uid;
+        allow delete: if false;
+      }
+
+      match /categories/{categoryId} {
+        allow read: if isActiveMember(householdId);
+        allow create, update: if isActiveMember(householdId)
+          && validCategory(categoryId)
+          && incoming().updatedBy == request.auth.uid;
+        allow delete: if false;
+      }
+
+      match /settings/{documentId} {
+        allow read: if isActiveMember(householdId);
+        allow create, update: if isOwner(householdId)
+          && incoming().updatedAt is int
+          && incoming().serverUpdatedAt == request.time;
+        allow delete: if false;
+      }
+    }
+
+    // Invitation code lookup: Cloud Functions only, never readable.
+    match /invitationCodes/{code} {
+      allow read, write: if false;
+    }
+  }
+}

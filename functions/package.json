@@ -1,0 +1,23 @@
+{
+  "name": "moneymate-functions",
+  "description": "MoneyMate Cloud Functions: trusted household and invitation management",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "test:unit": "node --test test/logic.test.js",
+    "test": "firebase emulators:exec --only firestore --project demo-moneymate \"node --test --test-concurrency=1 test/*.test.js\"",
+    "serve": "firebase emulators:start --only functions,firestore",
+    "deploy": "firebase deploy --only functions"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.4.0",
+    "firebase-functions": "^6.4.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
+    "firebase": "^11.10.0"
+  }
+}
