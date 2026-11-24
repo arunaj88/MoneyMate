@@ -12,6 +12,7 @@ import '../providers/budget_provider.dart';
 import '../providers/category_provider.dart';
 import '../providers/dashboard_provider.dart';
 import '../providers/household_provider.dart';
+import '../providers/recurring_provider.dart';
 import '../providers/report_provider.dart';
 import '../providers/reset_provider.dart';
 import '../providers/settings_provider.dart';
@@ -158,6 +159,13 @@ class _MoneyMateAppState extends State<MoneyMateApp> {
                     household: household,
                     budgets: budgets,
                   ),
+        ),
+        ChangeNotifierProxyProvider<TransactionProvider, RecurringProvider>(
+          // Not lazy: due occurrences are added at start-up.
+          lazy: false,
+          create: (_) => RecurringProvider(deps.recurringRepository),
+          update: (_, transactions, recurring) =>
+              recurring!..attach(transactions),
         ),
         ChangeNotifierProvider<ResetProvider>(
           create: (_) => ResetProvider(deps.dataResetService),

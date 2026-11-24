@@ -8,6 +8,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/date_range.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/household_provider.dart';
+import '../../../providers/recurring_provider.dart';
 import '../../../providers/reset_provider.dart';
 import '../../../providers/settings_provider.dart';
 import '../../../providers/sync_provider.dart';
@@ -17,6 +18,7 @@ import '../../household/widgets/household_widgets.dart';
 import '../data_management.dart';
 import '../reset_app.dart';
 import 'category_management_screen.dart';
+import 'recurring_screen.dart';
 
 /// App preferences, notifications, data management and app information.
 class SettingsScreen extends StatelessWidget {
@@ -269,6 +271,19 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ),
               ),
+              if (context.select<RecurringProvider, bool>((r) => r.isAvailable))
+                ListTile(
+                  key: const Key('recurringTile'),
+                  leading: const Icon(Icons.repeat_rounded),
+                  title: const Text('Recurring transactions'),
+                  subtitle: const Text('Salary, rent and other repeats'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const RecurringScreen(),
+                    ),
+                  ),
+                ),
             ],
           ),
           const _GroupLabel('Data'),

@@ -26,6 +26,10 @@ class Tables {
   /// not on this device because they are older than the retention window,
   /// so all-time balances stay correct after the local clean-up.
   static const String archivedTotals = 'archived_totals';
+
+  /// Recurring transaction rules (e.g. a monthly salary), kept on the
+  /// device that created them.
+  static const String recurringRules = 'recurring_rules';
 }
 
 /// Cloud sync state of a local row (`transactions.sync_status`).
@@ -113,7 +117,38 @@ class AppDatabase {
   static final Map<int, Future<void> Function(Database db)> _migrations = {
     2: _migrateToV2,
     3: _migrateToV3,
+    4: _migrateToV4,
   };
+
+  /// v4: recurring transaction rules. Adds a table only; no existing row
+  /// changes.
+  ///
+  /// There is no foreign key on `category_id`: deleting a category moves
+  /// its rules to "Other" (see `SqliteCategoryRepository.deleteWithin`),
+  /// and a rule whose category has gone uses "Other" when it runs.
+  static Future<void> _migrateToV4(Database db) async {
+    await db.execute('''
+      CREATE TABLE ${Tables.recurringRules} (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL CHECK (type IN ('income', 'expense')),
+        amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+        category_id TEXT NOT NULL,
+        frequency TEXT NOT NULL
+          CHECK (frequency IN ('weekly', 'monthly', 'yearly')),
+        start_date INTEGER NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        payment_method TEXT NOT NULL DEFAULT 'cash',
+        scope TEXT NOT NULL DEFAULT 'personal'
+          CHECK (scope IN ('personal', 'shared')),
+        household_id TEXT NOT NULL DEFAULT '',
+        next_index INTEGER NOT NULL DEFAULT 0 CHECK (next_index >= 0),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        created_by TEXT,
+        created_by_name TEXT
+      )
+    ''');
+  }
 
   /// v2: cloud sync state for transactions and a tombstone table for local
   /// deletions.

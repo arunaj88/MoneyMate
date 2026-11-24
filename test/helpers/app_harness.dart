@@ -22,13 +22,16 @@ class TestHarness {
        transactions = InMemoryTransactionRepository(initial: transactions),
        categories = InMemoryCategoryRepository(),
        budgets = InMemoryBudgetRepository(),
-       appSettings = InMemoryAppSettingsRepository();
+       appSettings = InMemoryAppSettingsRepository() {
+    recurring = InMemoryRecurringRepository(this.transactions);
+  }
 
   final FakeAuthService auth;
   final InMemoryTransactionRepository transactions;
   final InMemoryCategoryRepository categories;
   final InMemoryBudgetRepository budgets;
   final InMemoryAppSettingsRepository appSettings;
+  late final InMemoryRecurringRepository recurring;
 
   /// Household management; null leaves households unavailable.
   final HouseholdService? households;
@@ -71,6 +74,7 @@ class TestHarness {
           authService: auth,
           householdService: households,
           dataResetService: dataReset,
+          recurringRepository: recurring,
         ),
         minSplashDuration: Duration.zero,
       ),

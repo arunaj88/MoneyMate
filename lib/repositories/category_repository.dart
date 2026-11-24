@@ -135,6 +135,13 @@ class SqliteCategoryRepository implements CategoryRepository {
       where: "category_id = ? AND scope = 'personal'",
       whereArgs: [id],
     );
+    // Recurring rules keep repeating, as "Other".
+    await txn.update(
+      Tables.recurringRules,
+      {'category_id': DefaultCategories.otherIdFor(type), 'updated_at': now},
+      where: 'category_id = ?',
+      whereArgs: [id],
+    );
     final budgets = await txn.query(
       Tables.categoryBudgets,
       columns: ['id', 'household_id'],

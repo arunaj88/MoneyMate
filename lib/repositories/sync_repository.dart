@@ -731,6 +731,12 @@ class SqliteLocalSyncStore implements LocalSyncStore {
         where: 'household_id = ?',
         whereArgs: [householdId],
       );
+      // Shared rules can no longer add to the household.
+      await txn.delete(
+        Tables.recurringRules,
+        where: 'household_id = ?',
+        whereArgs: [householdId],
+      );
       for (final key in [
         SyncKeys.cursorMicros(scope),
         SyncKeys.cursorDocId(scope),
@@ -775,6 +781,7 @@ class SqliteLocalSyncStore implements LocalSyncStore {
           Tables.archivedTotals,
           Tables.budgets,
           Tables.categoryBudgets,
+          Tables.recurringRules,
         ]) {
           await txn.delete(
             table,
@@ -823,6 +830,11 @@ class SqliteLocalSyncStore implements LocalSyncStore {
       await txn.delete(
         Tables.budgets,
         where: "household_id = ''${older('updated_at')}",
+        whereArgs: args(),
+      );
+      await txn.delete(
+        Tables.recurringRules,
+        where: "household_id = ''${older('created_at')}",
         whereArgs: args(),
       );
       // Custom personal categories, unless remaining (shared) records use
@@ -879,6 +891,7 @@ class SqliteLocalSyncStore implements LocalSyncStore {
         Tables.categoryBudgets,
         Tables.budgets,
         Tables.transactions,
+        Tables.recurringRules,
       ]) {
         await txn.delete(table);
       }

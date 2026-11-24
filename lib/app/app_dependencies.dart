@@ -14,6 +14,7 @@ import '../core/services/transaction_sync_service.dart';
 import '../repositories/app_settings_repository.dart';
 import '../repositories/budget_repository.dart';
 import '../repositories/category_repository.dart';
+import '../repositories/recurring_repository.dart';
 import '../repositories/settings_sync_repository.dart';
 import '../repositories/sync_repository.dart';
 import '../repositories/transaction_repository.dart';
@@ -35,6 +36,7 @@ class AppDependencies {
     this.connectivity,
     this.householdService,
     this.dataResetService,
+    this.recurringRepository,
   });
 
   /// Opens the database and wires the SQLite-backed implementations.
@@ -66,6 +68,7 @@ class AppDependencies {
       connectivity: ConnectivityPlusMonitor(),
       householdService: FirebaseHouseholdService(),
       dataResetService: SyncDataResetService(syncService),
+      recurringRepository: SqliteRecurringRepository(database),
     );
   }
 
@@ -89,4 +92,7 @@ class AppDependencies {
   /// Reset App (this device only) and Restore My Cloud Data; null hides
   /// them (builds without cloud).
   final DataResetService? dataResetService;
+
+  /// Recurring transaction rules; null hides the Repeat option.
+  final RecurringRepository? recurringRepository;
 }

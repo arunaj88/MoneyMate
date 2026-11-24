@@ -2,17 +2,20 @@ import 'dart:async';
 
 import 'package:money_mate/core/services/auth_service.dart';
 import 'package:money_mate/core/services/backup_service.dart';
+import 'package:money_mate/core/services/recurring_scheduler.dart';
 import 'package:money_mate/core/services/transaction_calculator.dart';
 import 'package:money_mate/core/utils/date_range.dart';
 import 'package:money_mate/models/app_user.dart';
 import 'package:money_mate/models/budget_model.dart';
 import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/models/recurring_model.dart';
 import 'package:money_mate/models/report_models.dart';
 import 'package:money_mate/models/scope_models.dart';
 import 'package:money_mate/models/transaction_model.dart';
 import 'package:money_mate/repositories/app_settings_repository.dart';
 import 'package:money_mate/repositories/budget_repository.dart';
 import 'package:money_mate/repositories/category_repository.dart';
+import 'package:money_mate/repositories/recurring_repository.dart';
 import 'package:money_mate/repositories/transaction_repository.dart';
 
 /// In-memory repositories for widget tests (no real I/O, so they work
@@ -405,5 +408,37 @@ class FakeAuthService implements AuthService {
     calls.add('signOut');
     await _wait();
     _emit(null);
+  }
+}
+
+/// In-memory recurring rules that add their occurrences to [transactions].
+class InMemoryRecurringRepository implements RecurringRepository {
+  InMemoryRecurringRepository(this.transactions);
+
+  final InMemoryTransactionRepository transactions;
+  final List<RecurringRule> rules = [];
+
+  @override
+  Future<List<RecurringRule>> getRules() async =>
+      [...rules]..sort((a, b) => a.nextDate.compareTo(b.nextDate));
+
+  @override
+  Future<void> insert(RecurringRule rule) async => rules.add(rule);
+
+  @override
+  Future<void> delete(String id) async => rules.removeWhere((r) => r.id == id);
+
+  @override
+  Future<int> commit(DueOccurrences due) async {
+    final i = rules.indexWhere((r) => r.id == due.rule.id);
+    if (i < 0 || rules[i].nextIndex != due.rule.nextIndex) return 0;
+    var added = 0;
+    for (final t in due.transactions) {
+      if (transactions.items.any((e) => e.id == t.id)) continue;
+      transactions.items.add(t);
+      added++;
+    }
+    rules[i] = rules[i].copyWith(nextIndex: due.nextIndex);
+    return added;
   }
 }

@@ -5,11 +5,13 @@ import 'package:provider/provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/money.dart';
 import '../../../models/category_model.dart';
+import '../../../models/recurring_model.dart';
 import '../../../models/scope_models.dart';
 import '../../../models/transaction_model.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/category_provider.dart';
 import '../../../providers/household_provider.dart';
+import '../../../providers/recurring_provider.dart';
 import '../../../providers/settings_provider.dart';
 import '../../../providers/transaction_provider.dart';
 import '../../../providers/transaction_scope_provider.dart';
@@ -43,6 +45,9 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
   late DateTime _date;
   late PaymentMethod _paymentMethod;
   late TransactionScope _scope;
+
+  /// How a new transaction repeats; null = it does not.
+  RecurrenceFrequency? _repeat;
   bool _saving = false;
 
   bool get _isEditing => widget.transaction != null;
@@ -110,6 +115,16 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
     });
   }
 
+  Future<void> _pickRepeat() async {
+    final picked = await showModalBottomSheet<_RepeatChoice>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => _RepeatSheet(selected: _repeat, date: _date),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _repeat = picked.frequency);
+  }
+
   /// Explicit confirmation before a transaction changes owner.
   Future<bool> _confirmMove(String householdName) => showConfirmDialog(
     context,
@@ -148,7 +163,8 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
     if (moving && !await _confirmMove(householdName)) return;
     if (!mounted) return;
 
-    final successMessage = _isEditing
+    final repeat = _isEditing ? null : _repeat;
+    var successMessage = _isEditing
         ? (moving
               ? (_scope == TransactionScope.shared
                     ? 'Shared with $householdName'
@@ -156,7 +172,9 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
               : 'Transaction updated')
         : '${_type.label} of '
               '${context.read<SettingsProvider>().formatter.format(amount)} '
-              'added${_scope == TransactionScope.shared ? ' to $householdName' : ''}';
+              'added${_scope == TransactionScope.shared ? ' to $householdName' : ''}'
+              '${repeat != null ? ' · repeats ${repeat.label.toLowerCase()}' : ''}';
+    final recurring = context.read<RecurringProvider>();
 
     setState(() => _saving = true);
     try {
@@ -181,6 +199,26 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
           );
         }
         await provider.updateTransaction(edited, updatedBy: user?.uid);
+      } else if (repeat != null) {
+        final added = await recurring.addRule(
+          type: _type,
+          amountMinor: amount,
+          categoryId: _categoryId!,
+          startDate: _date,
+          frequency: repeat,
+          note: _noteController.text,
+          paymentMethod: _paymentMethod,
+          scope: _scope,
+          householdId: scope.householdId,
+          createdBy: user?.uid,
+          createdByName: user?.name,
+        );
+        // A start date in the past also adds the repeats since then.
+        if (added > 1) {
+          successMessage =
+              '$added ${_type.label.toLowerCase()} entries added · repeats '
+              '${repeat.label.toLowerCase()}';
+        }
       } else {
         await provider.addTransaction(
           type: _type,
@@ -229,6 +267,9 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
         : finance.expense;
     final scope = context.watch<TransactionScopeProvider>();
     final household = context.watch<HouseholdProvider>();
+    final canRepeat =
+        !_isEditing &&
+        context.select<RecurringProvider, bool>((r) => r.isAvailable);
     final createdLabel = widget.transaction == null
         ? null
         : sharedLabelFor(household, widget.transaction!);
@@ -389,6 +430,18 @@ class _AddEditTransactionScreenState extends State<AddEditTransactionScreen> {
                   value: DateFormat('EEEE, d MMMM yyyy').format(_date),
                   onTap: _pickDate,
                 ),
+                if (canRepeat) ...[
+                  const SizedBox(height: Spacing.sm),
+                  _FieldTile(
+                    key: const Key('repeatField'),
+                    icon: Icons.repeat_rounded,
+                    label: 'Repeat',
+                    value: _repeat == null
+                        ? 'Does not repeat'
+                        : RecurringRule.describe(_repeat!, _date),
+                    onTap: _pickRepeat,
+                  ),
+                ],
                 const SizedBox(height: Spacing.lg),
                 Text('Payment method', style: theme.textTheme.titleSmall),
                 const SizedBox(height: Spacing.sm),
@@ -485,8 +538,82 @@ class _HouseholdHint extends StatelessWidget {
   }
 }
 
+/// Result of the repeat sheet (wraps null = "does not repeat").
+class _RepeatChoice {
+  const _RepeatChoice(this.frequency);
+
+  final RecurrenceFrequency? frequency;
+}
+
+/// Bottom sheet for choosing how a new transaction repeats.
+class _RepeatSheet extends StatelessWidget {
+  const _RepeatSheet({required this.selected, required this.date});
+
+  final RecurrenceFrequency? selected;
+  final DateTime date;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    Widget option(RecurrenceFrequency? frequency, String title, String? sub) {
+      final isSelected = frequency == selected;
+      return ListTile(
+        key: Key('repeat-${frequency?.name ?? 'never'}'),
+        leading: Icon(
+          isSelected
+              ? Icons.radio_button_checked_rounded
+              : Icons.radio_button_off_rounded,
+          color: isSelected ? theme.colorScheme.primary : null,
+        ),
+        title: Text(title),
+        subtitle: sub == null ? null : Text(sub),
+        onTap: () => Navigator.of(context).pop(_RepeatChoice(frequency)),
+      );
+    }
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                Spacing.lg,
+                0,
+                Spacing.lg,
+                Spacing.sm,
+              ),
+              child: Text('Repeat', style: theme.textTheme.titleMedium),
+            ),
+            option(null, 'Does not repeat', null),
+            for (final f in RecurrenceFrequency.values)
+              option(f, f.label, RecurringRule.describe(f, date)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                Spacing.lg,
+                Spacing.sm,
+                Spacing.lg,
+                Spacing.lg,
+              ),
+              child: Text(
+                'Repeats are added automatically when they fall due. Stop '
+                'one any time in Settings → Recurring transactions.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _FieldTile extends StatelessWidget {
   const _FieldTile({
+    super.key,
     required this.icon,
     required this.label,
     required this.value,

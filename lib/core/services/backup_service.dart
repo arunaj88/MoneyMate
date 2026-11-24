@@ -5,6 +5,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../../models/budget_model.dart';
 import '../../models/category_model.dart';
+import '../../models/recurring_model.dart';
 import '../../models/transaction_model.dart';
 import '../constants/app_constants.dart';
 import '../database/app_database.dart';
@@ -29,6 +30,7 @@ class BackupContents {
     required this.budgetTargets,
     required this.categoryBudgets,
     required this.settings,
+    this.recurringRules = const [],
   });
 
   final DateTime? exportedAt;
@@ -37,6 +39,10 @@ class BackupContents {
   final List<BudgetTarget> budgetTargets;
   final List<CategoryBudget> categoryBudgets;
   final Map<String, dynamic> settings;
+
+  /// Personal recurring rules (absent from backups made before they
+  /// existed).
+  final List<RecurringRule> recurringRules;
 }
 
 /// Creates and restores JSON backups and exports CSV files.
@@ -149,6 +155,12 @@ abstract class BackupService {
       return b;
     });
 
+    final recurringRules = parseList('recurringRules', (m) {
+      final r = RecurringRule.fromJson(m);
+      if (r.isShared) throw const FormatException('scope');
+      return r;
+    });
+
     // Referential integrity: every transaction / category budget must point
     // at a category in the backup or a built-in category.
     final knownIds = {
@@ -173,6 +185,13 @@ abstract class BackupService {
         );
       }
     }
+    for (final r in recurringRules) {
+      if (!knownIds.contains(r.categoryId)) {
+        throw const BackupFormatException(
+          'A recurring transaction references an unknown category.',
+        );
+      }
+    }
 
     final settings = data['settings'];
     return BackupContents(
@@ -182,6 +201,7 @@ abstract class BackupService {
       budgetTargets: budgets,
       categoryBudgets: categoryBudgets,
       settings: settings is Map<String, dynamic> ? settings : const {},
+      recurringRules: recurringRules,
     );
   }
 }
@@ -212,6 +232,11 @@ class SqliteBackupService implements BackupService {
       Tables.categoryBudgets,
       where: "household_id = ''",
     );
+    final recurringRules = await _db.query(
+      Tables.recurringRules,
+      where: "household_id = ''",
+      orderBy: 'created_at',
+    );
 
     final document = {
       'app': AppConstants.backupAppId,
@@ -232,6 +257,9 @@ class SqliteBackupService implements BackupService {
             .toList(growable: false),
         'categoryBudgets': categoryBudgets
             .map((b) => CategoryBudget.fromMap(b).toJson())
+            .toList(growable: false),
+        'recurringRules': recurringRules
+            .map((r) => RecurringRule.fromMap(r).toJson())
             .toList(growable: false),
         'settings': settings ?? const <String, Object>{},
       },
@@ -290,11 +318,13 @@ class SqliteBackupService implements BackupService {
       await txn.delete(Tables.categoryBudgets, where: "household_id = ''");
       await txn.delete(Tables.budgets, where: "household_id = ''");
       await txn.delete(Tables.transactions, where: "scope = 'personal'");
+      await txn.delete(Tables.recurringRules, where: "household_id = ''");
       // Categories still used by shared records are kept.
       await txn.rawDelete(
         'DELETE FROM ${Tables.categories} WHERE '
         'id NOT IN (SELECT category_id FROM ${Tables.transactions}) AND '
-        'id NOT IN (SELECT category_id FROM ${Tables.categoryBudgets})',
+        'id NOT IN (SELECT category_id FROM ${Tables.categoryBudgets}) AND '
+        'id NOT IN (SELECT category_id FROM ${Tables.recurringRules})',
       );
       await txn.delete(
         Tables.appSettings,
@@ -383,6 +413,14 @@ class SqliteBackupService implements BackupService {
           ...b.toMap(),
           'household_id': '',
           'category_id': idMap[b.categoryId] ?? b.categoryId,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      for (final r in contents.recurringRules) {
+        // Occurrence IDs are stable, so ones already restored above (or
+        // deleted on this device) are not added again when the rule runs.
+        dataBatch.insert(Tables.recurringRules, {
+          ...r.toMap(),
+          'category_id': idMap[r.categoryId] ?? r.categoryId,
         }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
       await dataBatch.commit(noResult: true);

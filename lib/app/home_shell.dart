@@ -12,6 +12,7 @@ import '../features/transactions/transaction_actions.dart';
 import '../models/budget_model.dart';
 import '../providers/budget_provider.dart';
 import '../providers/dashboard_provider.dart';
+import '../providers/recurring_provider.dart';
 import '../providers/report_provider.dart';
 import '../shared/widgets/budget_progress_bar.dart';
 
@@ -69,10 +70,12 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   /// When the app resumes on a new day, week and month boundaries may have
-  /// moved, so recompute period-based figures.
+  /// moved, so recompute period-based figures. Recurring transactions that
+  /// fell due while the app was in the background are added first.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
+    context.read<RecurringProvider>().runDue();
     final today = PeriodUtils.dateOnly(DateTime.now());
     if (today == _lastActiveDay) return;
     _lastActiveDay = today;
@@ -182,18 +185,79 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       floatingActionButton: AnimatedScale(
         scale: showFab ? 1 : 0,
         duration: const Duration(milliseconds: 200),
-        child: FloatingActionButton.extended(
+        child: _AddTransactionFab(
           key: const Key('addTransactionFab'),
-          heroTag: 'addTransaction',
           onPressed: showFab ? () => openTransactionForm(context) : null,
-          icon: const Icon(Icons.add_rounded),
-          label: const Text('Add'),
         ),
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: _select,
         destinations: _destinations,
+      ),
+    );
+  }
+}
+
+/// Minimal circular "+" button with a soft shadow and press feedback.
+class _AddTransactionFab extends StatefulWidget {
+  const _AddTransactionFab({super.key, required this.onPressed});
+
+  final VoidCallback? onPressed;
+
+  @override
+  State<_AddTransactionFab> createState() => _AddTransactionFabState();
+}
+
+class _AddTransactionFabState extends State<_AddTransactionFab> {
+  bool _pressed = false;
+
+  void _setPressed(bool value) {
+    if (_pressed != value) setState(() => _pressed = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Semantics(
+      button: true,
+      label: 'Add transaction',
+      child: AnimatedScale(
+        scale: _pressed ? 0.92 : 1,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: scheme.primary.withValues(alpha: 0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Material(
+            color: scheme.primary,
+            shape: const CircleBorder(),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: widget.onPressed,
+              onTapDown: (_) => _setPressed(true),
+              onTapUp: (_) => _setPressed(false),
+              onTapCancel: () => _setPressed(false),
+              child: SizedBox.square(
+                dimension: 56,
+                child: Icon(
+                  Icons.add_rounded,
+                  size: 28,
+                  color: scheme.onPrimary,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
