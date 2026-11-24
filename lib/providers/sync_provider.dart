@@ -12,6 +12,7 @@ import 'auth_provider.dart';
 import 'budget_provider.dart';
 import 'category_provider.dart';
 import 'household_provider.dart';
+import 'savings_provider.dart';
 import 'transaction_provider.dart';
 
 enum SyncPhase {
@@ -87,6 +88,8 @@ class SyncProvider extends ChangeNotifier with WidgetsBindingObserver {
   HouseholdProvider? _household;
   int? _seenDataVersion;
   int? _seenBudgetVersion;
+  int? _seenSavingsVersion;
+  int? _seenSavingsRequest;
   int? _seenReleaseToken;
   HouseholdReleaseResult? _lastRelease;
 
@@ -142,6 +145,7 @@ class SyncProvider extends ChangeNotifier with WidgetsBindingObserver {
     TransactionProvider transactions, {
     HouseholdProvider? household,
     BudgetProvider? budgets,
+    SavingsProvider? savings,
   }) {
     _categories = categories;
     _transactions = transactions;
@@ -175,6 +179,24 @@ class SyncProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (budgetVersion != _seenBudgetVersion) {
       final first = _seenBudgetVersion == null;
       _seenBudgetVersion = budgetVersion;
+      if (!first && _uid != null && uid == _uid) {
+        _debounce?.cancel();
+        _debounce = Timer(changeDebounce, syncNow);
+      }
+    }
+
+    final savingsRequest = savings?.syncRequestVersion;
+    if (savingsRequest != _seenSavingsRequest) {
+      final first = _seenSavingsRequest == null;
+      _seenSavingsRequest = savingsRequest;
+      // E.g. just joined a shared goal: download it now.
+      if (!first && _uid != null && uid == _uid) Future.microtask(syncNow);
+    }
+
+    final savingsVersion = savings?.localChangeVersion;
+    if (savingsVersion != _seenSavingsVersion) {
+      final first = _seenSavingsVersion == null;
+      _seenSavingsVersion = savingsVersion;
       if (!first && _uid != null && uid == _uid) {
         _debounce?.cancel();
         _debounce = Timer(changeDebounce, syncNow);

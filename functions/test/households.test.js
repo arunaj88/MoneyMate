@@ -1,7 +1,7 @@
 'use strict';
 
 // Household handlers against the Firestore emulator:
-//   npm test   (runs `firebase emulators:exec --only firestore ...`)
+//   npm test   (runs `firebase emulators:exec --only firestore,storage ...`)
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -313,6 +313,46 @@ test.describe('household functions', { skip }, () => {
       .collection(`households/${householdId}/members`)
       .get();
     assert.equal(members.size, 2);
+  });
+
+  test('a member refreshes only their own profile from their account', async () => {
+    const householdId = await householdWithPartner();
+    const photo = 'https://firebasestorage.googleapis.com/v0/b/x/o/p.jpg';
+    const accounts = {
+      [partner.uid]: { displayName: 'Sara K', email: 'sara@example.com', photoURL: photo },
+    };
+    const withUsers = { ...deps, getUser: async (uid) => accounts[uid] ?? {} };
+
+    await h.refreshMemberProfile(db, partner, { householdId }, withUsers);
+    const member = await db
+      .doc(`households/${householdId}/members/${partner.uid}`)
+      .get();
+    assert.equal(member.get('photoUrl'), photo);
+    assert.equal(member.get('displayName'), 'Sara K');
+    assert.equal(member.get('role'), 'member');
+    assert.equal(member.get('status'), 'active');
+
+    // A removed photo is cleared too.
+    accounts[partner.uid] = { displayName: 'Sara K', email: 'sara@example.com' };
+    await h.refreshMemberProfile(db, partner, { householdId }, withUsers);
+    const cleared = await db
+      .doc(`households/${householdId}/members/${partner.uid}`)
+      .get();
+    assert.equal(cleared.get('photoUrl'), null);
+
+    // The owner's document is untouched, and outsiders are refused.
+    const ownerDoc = await db
+      .doc(`households/${householdId}/members/${owner.uid}`)
+      .get();
+    assert.equal(ownerDoc.get('displayName'), 'Omar');
+    await rejects(
+      h.refreshMemberProfile(db, stranger, { householdId }, withUsers),
+      'permission-denied',
+    );
+    await rejects(
+      h.refreshMemberProfile(db, null, { householdId }, withUsers),
+      'unauthenticated',
+    );
   });
 
   test('the owner must transfer ownership before leaving', async () => {

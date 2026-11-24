@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../core/constants/app_constants.dart';
 import '../core/services/backup_service.dart';
 import '../core/services/file_service.dart';
+import '../core/services/photo_picker.dart';
 import '../core/theme/app_theme.dart';
 import '../core/theme/system_ui.dart';
 import '../features/auth/screens/splash_screen.dart';
@@ -12,9 +13,11 @@ import '../providers/budget_provider.dart';
 import '../providers/category_provider.dart';
 import '../providers/dashboard_provider.dart';
 import '../providers/household_provider.dart';
+import '../providers/notification_provider.dart';
 import '../providers/recurring_provider.dart';
 import '../providers/report_provider.dart';
 import '../providers/reset_provider.dart';
+import '../providers/savings_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/sync_provider.dart';
 import '../providers/transaction_provider.dart';
@@ -50,7 +53,13 @@ class _MoneyMateAppState extends State<MoneyMateApp> {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider<AuthProvider>(
-          create: (_) => AuthProvider(deps.authService, deps.preferences),
+          create: (_) => AuthProvider(
+            deps.authService,
+            deps.preferences,
+            photoService: deps.photoPicker == null
+                ? null
+                : deps.profilePhotoService,
+          ),
         ),
         ChangeNotifierProxyProvider<AuthProvider, HouseholdProvider>(
           lazy: false,
@@ -69,6 +78,7 @@ class _MoneyMateAppState extends State<MoneyMateApp> {
         ),
         Provider<BackupService>.value(value: deps.backupService),
         Provider<FileService>.value(value: deps.fileService),
+        Provider<PhotoPicker?>.value(value: deps.photoPicker),
         Provider<TransactionRepository>.value(
           value: deps.transactionRepository,
         ),
@@ -77,6 +87,23 @@ class _MoneyMateAppState extends State<MoneyMateApp> {
         ),
         ChangeNotifierProvider<CategoryProvider>(
           create: (_) => CategoryProvider(deps.categoryRepository)..load(),
+        ),
+        ChangeNotifierProxyProvider3<
+          AuthProvider,
+          SettingsProvider,
+          CategoryProvider,
+          NotificationProvider
+        >(
+          // Not lazy: registers for pushes and shows them from start-up.
+          lazy: false,
+          create: (_) => NotificationProvider(
+            preferences: deps.preferences,
+            push: deps.pushMessaging,
+            local: deps.localNotifier,
+            cloud: deps.notificationCloud,
+          ),
+          update: (_, auth, settings, categories, notifications) =>
+              notifications!..attach(auth, settings, categories),
         ),
         ChangeNotifierProxyProvider2<
           CategoryProvider,
@@ -91,16 +118,31 @@ class _MoneyMateAppState extends State<MoneyMateApp> {
             ..onScopeChanged(scope)
             ..onCategoriesChanged(categories),
         ),
-        ChangeNotifierProxyProvider3<
+        ChangeNotifierProxyProvider2<
+          AuthProvider,
+          TransactionProvider,
+          SavingsProvider
+        >(
+          create: (_) =>
+              SavingsProvider(deps.savingsRepository, cloud: deps.savingsCloud),
+          update: (_, auth, transactions, savings) =>
+              savings!..attach(auth, transactions),
+        ),
+        ChangeNotifierProxyProvider4<
           SettingsProvider,
           CategoryProvider,
           TransactionProvider,
+          SavingsProvider,
           DashboardProvider
         >(
           create: (_) => DashboardProvider(deps.transactionRepository),
-          update: (_, settings, categories, transactions, dashboard) =>
-              dashboard!
-                ..updateDependencies(settings, categories, transactions),
+          update: (_, settings, categories, transactions, savings, dashboard) =>
+              dashboard!..updateDependencies(
+                settings,
+                categories,
+                transactions,
+                savings,
+              ),
         ),
         ChangeNotifierProxyProvider4<
           SettingsProvider,
@@ -109,11 +151,12 @@ class _MoneyMateAppState extends State<MoneyMateApp> {
           HouseholdProvider,
           BudgetProvider
         >(
-          create: (_) => BudgetProvider(
+          create: (context) => BudgetProvider(
             budgetRepository: deps.budgetRepository,
             transactionRepository: deps.transactionRepository,
             appSettingsRepository: deps.appSettingsRepository,
             history: deps.historySource,
+            alertSink: context.read<NotificationProvider>(),
           ),
           update: (_, settings, categories, transactions, household, budget) =>
               budget!..updateDependencies(
@@ -136,12 +179,13 @@ class _MoneyMateAppState extends State<MoneyMateApp> {
           update: (_, settings, categories, transactions, report) =>
               report!..updateDependencies(settings, categories, transactions),
         ),
-        ChangeNotifierProxyProvider5<
+        ChangeNotifierProxyProvider6<
           AuthProvider,
           HouseholdProvider,
           CategoryProvider,
           TransactionProvider,
           BudgetProvider,
+          SavingsProvider,
           SyncProvider
         >(
           // Not lazy: sync runs in the background from start-up.
@@ -151,19 +195,32 @@ class _MoneyMateAppState extends State<MoneyMateApp> {
             connectivity: deps.connectivity,
           ),
           update:
-              (_, auth, household, categories, transactions, budgets, sync) =>
-                  sync!..updateDependencies(
-                    auth,
-                    categories,
-                    transactions,
-                    household: household,
-                    budgets: budgets,
-                  ),
+              (
+                _,
+                auth,
+                household,
+                categories,
+                transactions,
+                budgets,
+                savings,
+                sync,
+              ) => sync!
+                ..updateDependencies(
+                  auth,
+                  categories,
+                  transactions,
+                  household: household,
+                  budgets: budgets,
+                  savings: savings,
+                ),
         ),
         ChangeNotifierProxyProvider<TransactionProvider, RecurringProvider>(
           // Not lazy: due occurrences are added at start-up.
           lazy: false,
-          create: (_) => RecurringProvider(deps.recurringRepository),
+          create: (context) => RecurringProvider(
+            deps.recurringRepository,
+            sink: context.read<NotificationProvider>(),
+          ),
           update: (_, transactions, recurring) =>
               recurring!..attach(transactions),
         ),

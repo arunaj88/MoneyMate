@@ -10,12 +10,14 @@ import 'package:money_mate/models/budget_model.dart';
 import 'package:money_mate/models/category_model.dart';
 import 'package:money_mate/models/recurring_model.dart';
 import 'package:money_mate/models/report_models.dart';
+import 'package:money_mate/models/savings_model.dart';
 import 'package:money_mate/models/scope_models.dart';
 import 'package:money_mate/models/transaction_model.dart';
 import 'package:money_mate/repositories/app_settings_repository.dart';
 import 'package:money_mate/repositories/budget_repository.dart';
 import 'package:money_mate/repositories/category_repository.dart';
 import 'package:money_mate/repositories/recurring_repository.dart';
+import 'package:money_mate/repositories/savings_repository.dart';
 import 'package:money_mate/repositories/transaction_repository.dart';
 
 /// In-memory repositories for widget tests (no real I/O, so they work
@@ -440,5 +442,133 @@ class InMemoryRecurringRepository implements RecurringRepository {
     }
     rules[i] = rules[i].copyWith(nextIndex: due.nextIndex);
     return added;
+  }
+}
+
+/// In-memory [SavingsRepository] with the same rules as the SQLite one.
+class InMemorySavingsRepository implements SavingsRepository {
+  final List<SavingsGoal> goals = [];
+  final List<SavingsEntry> entries = [];
+  final Map<String, List<SharedGoalMember>> members = {};
+  final Map<String?, List<SharedGoalInvitation>> invitations = {};
+
+  int _balance(String goalId) => entries
+      .where((e) => e.goalId == goalId)
+      .fold(0, (s, e) => s + e.signedMinor);
+
+  @override
+  Future<List<SavingsGoal>> getGoals({String? uid}) async {
+    int rank(SavingsGoal g) => g.status.index;
+    final result =
+        [
+          for (final g in goals)
+            g.copyWith(
+              savedMinor: _balance(g.id),
+              myContributionMinor: entries
+                  .where((e) => e.goalId == g.id && e.userUid == uid)
+                  .fold<int>(0, (s, e) => s + e.signedMinor),
+              memberCount: (members[g.id] ?? const [])
+                  .where((m) => m.isActive)
+                  .length,
+              firstEntryDate: () {
+                final dates =
+                    entries
+                        .where((e) => e.goalId == g.id)
+                        .map((e) => e.date)
+                        .toList()
+                      ..sort();
+                return dates.isEmpty ? null : dates.first;
+              },
+            ),
+        ]..sort((a, b) {
+          final byStatus = rank(a).compareTo(rank(b));
+          return byStatus != 0 ? byStatus : b.createdAt.compareTo(a.createdAt);
+        });
+    return result;
+  }
+
+  @override
+  Future<List<SavingsEntry>> getEntries(String goalId) async =>
+      entries.where((e) => e.goalId == goalId).toList()
+        ..sort((a, b) => b.date.compareTo(a.date));
+
+  @override
+  Future<void> insertGoal(SavingsGoal goal, {bool synced = false}) async {
+    goals.removeWhere((g) => g.id == goal.id);
+    goals.add(goal);
+  }
+
+  @override
+  Future<void> updateGoal(SavingsGoal goal, {bool synced = false}) async {
+    final i = goals.indexWhere((g) => g.id == goal.id);
+    if (i < 0) throw const SavingsException('This goal no longer exists.');
+    goals[i] = goal;
+  }
+
+  @override
+  Future<void> deleteGoal(String goalId, DateTime deletedAt) async {
+    goals.removeWhere((g) => g.id == goalId);
+    entries.removeWhere((e) => e.goalId == goalId);
+  }
+
+  @override
+  Future<void> addEntry(SavingsEntry entry, {bool synced = false}) async {
+    if (!goals.any((g) => g.id == entry.goalId)) {
+      throw const SavingsException('This goal no longer exists.');
+    }
+    if (!synced &&
+        !entry.isDeposit &&
+        entry.amountMinor > _balance(entry.goalId)) {
+      throw const SavingsException(
+        'You cannot withdraw more than is saved in this goal.',
+      );
+    }
+    if (entries.any((e) => e.id == entry.id)) return;
+    entries.add(entry);
+  }
+
+  @override
+  Future<void> deleteEntry(String entryId, DateTime deletedAt) async {
+    final entry = entries.where((e) => e.id == entryId).firstOrNull;
+    if (entry == null) return;
+    final goal = goals.where((g) => g.id == entry.goalId).firstOrNull;
+    if (goal != null && !goal.isPersonal) {
+      throw const SavingsException('Entries of shared goals stay.');
+    }
+    if (entry.isDeposit && _balance(entry.goalId) - entry.amountMinor < 0) {
+      throw const SavingsException(
+        'Money from this contribution has already been withdrawn. '
+        'Delete the withdrawal first.',
+      );
+    }
+    entries.remove(entry);
+  }
+
+  @override
+  Future<List<SharedGoalMember>> getMembers(String goalId) async =>
+      members[goalId] ?? const [];
+
+  @override
+  Future<void> replaceMembers(
+    String goalId,
+    List<SharedGoalMember> list,
+  ) async => members[goalId] = [...list];
+
+  @override
+  Future<List<SharedGoalInvitation>> getInvitations({String? goalId}) async =>
+      invitations[goalId] ?? const [];
+
+  @override
+  Future<void> replaceInvitations(
+    List<SharedGoalInvitation> list, {
+    String? goalId,
+  }) async => invitations[goalId] = [...list];
+
+  @override
+  Future<void> releaseSharedGoal(String goalId) async {
+    goals.removeWhere((g) => g.id == goalId);
+    entries.removeWhere((e) => e.goalId == goalId);
+    members.remove(goalId);
+    invitations.remove(goalId);
   }
 }

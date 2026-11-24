@@ -1,21 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:permission_handler/permission_handler.dart'
+    show openAppSettings;
 import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/currencies.dart';
+import '../../../core/services/notification_service.dart';
+import '../../../core/services/photo_picker.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/date_range.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/household_provider.dart';
+import '../../../providers/notification_provider.dart';
 import '../../../providers/recurring_provider.dart';
 import '../../../providers/reset_provider.dart';
+import '../../../providers/savings_provider.dart';
 import '../../../providers/settings_provider.dart';
 import '../../../providers/sync_provider.dart';
 import '../../../shared/widgets/dialogs.dart';
-import '../../../shared/widgets/user_avatar.dart';
 import '../../household/widgets/household_widgets.dart';
+import '../../savings/savings_actions.dart';
 import '../data_management.dart';
+import '../profile_photo.dart';
 import '../reset_app.dart';
 import 'category_management_screen.dart';
 import 'recurring_screen.dart';
@@ -115,11 +122,25 @@ class SettingsScreen extends StatelessWidget {
     }
   }
 
+  static String _photoStatus(AuthProvider auth) {
+    if (auth.isRunning(AuthAction.updatePhoto)) {
+      final progress = auth.photoProgress;
+      return progress == null || progress == 0
+          ? 'Uploading…'
+          : 'Uploading… ${(progress * 100).round()}%';
+    }
+    if (auth.isRunning(AuthAction.removePhoto)) return 'Removing…';
+    return 'Gallery or camera · syncs to all your devices';
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsProvider>();
     final auth = context.watch<AuthProvider>();
+    final notifications = context.watch<NotificationProvider>();
     final user = auth.user;
+    final canChangePhoto =
+        auth.canChangePhoto && context.read<PhotoPicker?>() != null;
     final data = DataManagement(context);
 
     return Scaffold(
@@ -133,7 +154,7 @@ class SettingsScreen extends StatelessWidget {
               ListTile(
                 key: const Key('accountTile'),
                 contentPadding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                leading: UserAvatar(user: user, radius: 24),
+                leading: const AccountAvatar(radius: 24),
                 title: Text(
                   user?.name ?? 'Not signed in',
                   maxLines: 1,
@@ -146,7 +167,26 @@ class SettingsScreen extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
+                trailing: canChangePhoto
+                    ? const Icon(Icons.chevron_right_rounded)
+                    : null,
+                onTap: canChangePhoto && !auth.isBusy
+                    ? () => changeProfilePhoto(context)
+                    : null,
               ),
+              if (canChangePhoto)
+                ListTile(
+                  key: const Key('changePhotoTile'),
+                  leading: const Icon(Icons.add_a_photo_outlined),
+                  title: Text(
+                    user?.hasPhoto ?? false
+                        ? 'Change profile photo'
+                        : 'Add a profile photo',
+                  ),
+                  subtitle: Text(_photoStatus(auth)),
+                  enabled: !auth.isBusy,
+                  onTap: () => changeProfilePhoto(context),
+                ),
               ListTile(
                 key: const Key('signOutTile'),
                 leading: auth.isRunning(AuthAction.signOut)
@@ -239,7 +279,12 @@ class SettingsScreen extends StatelessWidget {
           const _GroupLabel('Notifications'),
           _SettingsCard(
             children: [
+              if (notifications.pushSupported &&
+                  auth.isAuthenticated &&
+                  !notifications.permission.isGranted)
+                const _NotificationPermissionTile(),
               SwitchListTile(
+                key: const Key('budgetAlertsSwitch'),
                 secondary: const Icon(Icons.notifications_active_outlined),
                 title: const Text('Budget alerts'),
                 subtitle: const Text(
@@ -255,6 +300,52 @@ class SettingsScreen extends StatelessWidget {
                 value: settings.categoryAlertsEnabled,
                 onChanged: settings.setCategoryAlertsEnabled,
               ),
+              if (context.select<RecurringProvider, bool>((r) => r.isAvailable))
+                SwitchListTile(
+                  key: const Key('recurringNotificationsSwitch'),
+                  secondary: const Icon(Icons.event_repeat_rounded),
+                  title: const Text('Recurring transactions'),
+                  subtitle: const Text(
+                    'When salary, rent and other repeats are added',
+                  ),
+                  value: settings.recurringNotifications,
+                  onChanged: settings.setRecurringNotifications,
+                ),
+              if (notifications.pushSupported && auth.isAuthenticated) ...[
+                SwitchListTile(
+                  key: const Key('householdActivitySwitch'),
+                  secondary: const Icon(Icons.groups_outlined),
+                  title: const Text('Household activity'),
+                  subtitle: const Text(
+                    'Shared transactions by others, and members joining '
+                    'or leaving',
+                  ),
+                  value: settings.householdActivityNotifications,
+                  onChanged: settings.setHouseholdActivityNotifications,
+                ),
+                SwitchListTile(
+                  key: const Key('householdBudgetSwitch'),
+                  secondary: const Icon(Icons.account_balance_wallet_outlined),
+                  title: const Text('Household budget alerts'),
+                  subtitle: const Text(
+                    'When a shared budget reaches 80%, 90% or 100% after '
+                    "someone else's spending",
+                  ),
+                  value: settings.householdBudgetNotifications,
+                  onChanged: settings.setHouseholdBudgetNotifications,
+                ),
+                SwitchListTile(
+                  key: const Key('savingsNotificationsSwitch'),
+                  secondary: const Icon(Icons.savings_outlined),
+                  title: const Text('Savings goal updates'),
+                  subtitle: const Text(
+                    'Contributions to household and shared goals, and goals '
+                    'reaching their target',
+                  ),
+                  value: settings.savingsNotifications,
+                  onChanged: settings.setSavingsNotifications,
+                ),
+              ],
             ],
           ),
           const _GroupLabel('Categories'),
@@ -271,6 +362,15 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ),
               ),
+              if (context.select<SavingsProvider, bool>((s) => s.isAvailable))
+                ListTile(
+                  key: const Key('savingsTile'),
+                  leading: const Icon(Icons.savings_outlined),
+                  title: const Text('Savings goals'),
+                  subtitle: const Text('Trips, emergency fund, gold and more'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => openSavingsScreen(context),
+                ),
               if (context.select<RecurringProvider, bool>((r) => r.isAvailable))
                 ListTile(
                   key: const Key('recurringTile'),
@@ -481,6 +581,50 @@ class _SyncCard extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Shown while MoneyMate may not show notifications: asks, or sends the
+/// user to the system settings once Android stops asking.
+class _NotificationPermissionTile extends StatelessWidget {
+  const _NotificationPermissionTile();
+
+  Future<void> _allow(BuildContext context) async {
+    final notifications = context.read<NotificationProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    final wasDenied = notifications.permission == NotificationPermission.denied;
+    final result = await notifications.requestPermission();
+    if (result.isGranted) return;
+    if (wasDenied) {
+      // The system no longer shows its prompt: only Settings can allow it.
+      await openAppSettings();
+      return;
+    }
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Notifications stay off. You can allow them later in the '
+          'system settings.',
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ListTile(
+      key: const Key('notificationPermissionTile'),
+      leading: Icon(Icons.notifications_off_outlined, color: scheme.error),
+      title: const Text('Notifications are off'),
+      subtitle: const Text(
+        'Allow them to get budget alerts and household updates',
+      ),
+      trailing: FilledButton.tonal(
+        onPressed: () => _allow(context),
+        child: const Text('Allow'),
+      ),
     );
   }
 }

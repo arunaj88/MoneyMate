@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:money_mate/core/services/notification_events.dart';
 import 'package:money_mate/models/budget_model.dart';
 import 'package:money_mate/models/transaction_model.dart';
 import 'package:money_mate/providers/budget_provider.dart';
@@ -126,6 +127,33 @@ void main() {
     expect(restarted.takePendingAlerts(), isEmpty);
   });
 
+  test('new alerts also reach the notification sink', () async {
+    final sink = _RecordingSink();
+    final notifying = BudgetProvider(
+      budgetRepository: budgets,
+      transactionRepository: transactions,
+      appSettingsRepository: appSettings,
+      alertSink: sink,
+      clock: () => now,
+    );
+    await notifying.setTarget(BudgetPeriod.weekly, 10000);
+    transactions.items.add(
+      tx(id: 'a', amountMinor: 9500, date: DateTime(2026, 11, 24)),
+    );
+    await notifying.refresh();
+    await pumpEventQueue();
+
+    final event = sink.events.single;
+    expect(event.local!.level, BudgetAlertLevel.warning);
+    expect(event.local!.message, contains('95%'));
+    // Personal budgets are never shared.
+    expect(event.household, isNull);
+
+    await notifying.refresh();
+    await pumpEventQueue();
+    expect(sink.events, hasLength(1));
+  });
+
   test('category budgets track spending in their category only', () async {
     transactions.items.addAll([
       tx(id: 'f1', amountMinor: 45000, date: DateTime(2026, 11, 5)),
@@ -170,4 +198,12 @@ void main() {
       throwsArgumentError,
     );
   });
+}
+
+class _RecordingSink implements BudgetAlertSink {
+  final List<BudgetAlertEvent> events = [];
+
+  @override
+  Future<void> budgetAlertRaised(BudgetAlertEvent event) async =>
+      events.add(event);
 }

@@ -5,7 +5,9 @@ import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../models/app_user.dart';
 import '../../../models/household_models.dart';
+import '../../../providers/auth_provider.dart';
 import '../../../providers/household_provider.dart';
 import '../../../providers/sync_provider.dart';
 import '../../../shared/widgets/app_card.dart';
@@ -431,6 +433,7 @@ class _MembersCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final household = context.watch<HouseholdProvider>();
+    final me = context.select<AuthProvider, AppUser?>((a) => a.user);
     final theme = Theme.of(context);
     return AppCard(
       padding: const EdgeInsets.fromLTRB(
@@ -450,7 +453,14 @@ class _MembersCard extends StatelessWidget {
           for (final m in household.members)
             ListTile(
               key: ValueKey('member-${m.uid}'),
-              leading: UserAvatar(user: m.profile, radius: 20),
+              // Your own row follows your account at once; the member
+              // document catches up when the server refreshes it.
+              leading: UserAvatar(
+                user: m.uid == household.uid && me?.uid == m.uid
+                    ? me!
+                    : m.profile,
+                radius: 20,
+              ),
               title: Text(
                 m.uid == household.uid ? '${m.name} (you)' : m.name,
                 maxLines: 1,

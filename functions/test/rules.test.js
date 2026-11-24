@@ -1,7 +1,7 @@
 'use strict';
 
 // firestore.rules against the documents the app actually writes:
-//   npm test   (runs `firebase emulators:exec --only firestore ...`)
+//   npm test   (runs `firebase emulators:exec --only firestore,storage ...`)
 
 const test = require('node:test');
 const fs = require('node:fs');
@@ -276,6 +276,79 @@ test.describe('firestore.rules', { skip }, () => {
     );
   });
 
+  test('savings goals and entries are private and validated', async () => {
+    // Exactly as FirestoreSavingsStore writes them.
+    const goal = {
+      id: 'g1',
+      name: 'Japan trip',
+      purpose: 'trip',
+      customPurpose: '',
+      targetMinor: 1_000_000,
+      targetDate: null,
+      notes: '',
+      status: 'active',
+      createdAt: 1,
+      completedAt: null,
+      updatedAt: 1,
+      deleted: false,
+      serverUpdatedAt: now(),
+    };
+    const entry = {
+      id: 'e1',
+      goalId: 'g1',
+      type: 'deposit',
+      amountMinor: 25_000,
+      date: 1,
+      note: '',
+      createdAt: 1,
+      updatedAt: 1,
+      deleted: false,
+      serverUpdatedAt: now(),
+    };
+    const goalPath = `users/${OWNER}/savingsGoals/g1`;
+    const entryPath = `users/${OWNER}/savingsEntries/e1`;
+
+    await assertSucceeds(db(OWNER).doc(goalPath).set(goal));
+    await assertSucceeds(db(OWNER).doc(entryPath).set(entry));
+    await assertSucceeds(db(OWNER).doc(goalPath).get());
+
+    // Other users can neither read nor write them.
+    await assertFails(db(PARTNER).doc(goalPath).get());
+    await assertFails(db(PARTNER).doc(entryPath).get());
+    await assertFails(db(PARTNER).doc(goalPath).set(goal));
+    await assertFails(db(null).doc(goalPath).get());
+
+    // Invalid documents are refused.
+    await assertFails(
+      db(OWNER).doc(goalPath).set({ ...goal, targetMinor: 0 }),
+    );
+    await assertFails(db(OWNER).doc(goalPath).set({ ...goal, name: '' }));
+    await assertFails(
+      db(OWNER).doc(goalPath).set({ ...goal, status: 'archived' }),
+    );
+    await assertFails(
+      db(OWNER).doc(entryPath).set({ ...entry, amountMinor: -5 }),
+    );
+    await assertFails(
+      db(OWNER).doc(entryPath).set({ ...entry, type: 'income' }),
+    );
+    await assertFails(
+      db(OWNER).doc(`users/${OWNER}/savingsEntries/other`).set(entry),
+    );
+
+    // Soft deletion is allowed; hard deletion never.
+    await assertSucceeds(
+      db(OWNER).doc(goalPath).set({
+        id: 'g1',
+        deleted: true,
+        updatedAt: 2,
+        deletedAt: 2,
+        serverUpdatedAt: now(),
+      }),
+    );
+    await assertFails(db(OWNER).doc(entryPath).delete());
+  });
+
   // -------------------------------------------------------------- shared
 
   test('active members read and create shared transactions', async () => {
@@ -439,5 +512,499 @@ test.describe('firestore.rules', { skip }, () => {
     await assertSucceeds(db(OWNER).doc(path).set(data));
     await assertFails(db(PARTNER).doc(path).set(data));
     await assertSucceeds(db(PARTNER).doc(path).get());
+  });
+
+  // ------------------------------------------------------ savings totals
+
+  /** A goal document as the app writes it (household or shared). */
+  function goalDoc(id, extra = {}) {
+    return {
+      id,
+      name: 'Family trip',
+      purpose: 'trip',
+      customPurpose: '',
+      targetMinor: 500_000,
+      targetDate: null,
+      notes: '',
+      status: 'active',
+      createdAt: 1,
+      completedAt: null,
+      updatedAt: 1,
+      deleted: false,
+      serverUpdatedAt: now(),
+      ...extra,
+    };
+  }
+
+  function entryDoc(id, goalId, uid, amount, type = 'deposit') {
+    return {
+      id,
+      goalId,
+      type,
+      amountMinor: amount,
+      date: 1,
+      note: '',
+      createdAt: 1,
+      updatedAt: 1,
+      userUid: uid,
+      userName: 'Someone',
+      deleted: false,
+      serverUpdatedAt: now(),
+    };
+  }
+
+  /** Writes an entry and the goal's new total together, as the app does. */
+  function recordEntry(client, goalPath, entriesPath, entry, newTotal) {
+    const batch = client.batch();
+    batch.set(client.doc(`${entriesPath}/${entry.id}`), entry);
+    batch.update(client.doc(goalPath), {
+      savedMinor: newTotal,
+      lastEntryId: entry.id,
+    });
+    return batch.commit();
+  }
+
+  test('household savings: members only, totals move with entries', async () => {
+    const goalPath = `households/${HID}/savingsGoals/hg`;
+    const entries = `households/${HID}/savingsEntries`;
+    const household = (uid, extra = {}) =>
+      goalDoc('hg', {
+        ownership: 'household',
+        householdId: HID,
+        createdBy: uid,
+        updatedBy: uid,
+        ...extra,
+      });
+
+    await assertFails(db(STRANGER).doc(goalPath).set(household(STRANGER)));
+    await assertFails(db(REMOVED).doc(goalPath).set(household(REMOVED)));
+    // A goal cannot start with money in it.
+    await assertFails(
+      db(PARTNER).doc(goalPath).set(household(PARTNER, { savedMinor: 100 })),
+    );
+    await assertSucceeds(db(PARTNER).doc(goalPath).set(household(PARTNER)));
+    await assertSucceeds(db(OWNER).doc(goalPath).get());
+    await assertFails(db(STRANGER).doc(goalPath).get());
+    await assertFails(db(REMOVED).doc(goalPath).get());
+
+    // A contribution moves the total by exactly its amount.
+    await assertSucceeds(
+      recordEntry(db(OWNER), goalPath, entries, entryDoc('e1', 'hg', OWNER, 300), 300),
+    );
+    // Wrong total, someone else's name, or an existing entry ID: refused.
+    await assertFails(
+      recordEntry(db(OWNER), goalPath, entries, entryDoc('e2', 'hg', OWNER, 100), 999),
+    );
+    await assertFails(
+      recordEntry(db(PARTNER), goalPath, entries, entryDoc('e3', 'hg', OWNER, 100), 400),
+    );
+    await assertFails(
+      recordEntry(db(OWNER), goalPath, entries, entryDoc('e1', 'hg', OWNER, 300), 600),
+    );
+    // The total alone, or an entry alone, cannot be written.
+    await assertFails(db(OWNER).doc(goalPath).update({ savedMinor: 10_000 }));
+    await assertFails(
+      db(OWNER).doc(`${entries}/e4`).set(entryDoc('e4', 'hg', OWNER, 50)),
+    );
+    // Withdrawals never take the total below zero.
+    await assertFails(
+      recordEntry(
+        db(PARTNER), goalPath, entries,
+        entryDoc('w1', 'hg', PARTNER, 301, 'withdrawal'), -1,
+      ),
+    );
+    await assertSucceeds(
+      recordEntry(
+        db(PARTNER), goalPath, entries,
+        entryDoc('w2', 'hg', PARTNER, 100, 'withdrawal'), 200,
+      ),
+    );
+    // Entries are permanent.
+    await assertFails(db(OWNER).doc(`${entries}/e1`).update({ amountMinor: 1 }));
+    await assertFails(db(OWNER).doc(`${entries}/e1`).delete());
+    // Editing details cannot touch the total.
+    await assertFails(
+      db(OWNER).doc(goalPath).set(
+        household(PARTNER, { updatedBy: OWNER, savedMinor: 0 }),
+        { merge: true },
+      ),
+    );
+    await assertSucceeds(
+      db(OWNER).doc(goalPath).set(
+        { name: 'Bigger trip', updatedAt: 2, updatedBy: OWNER, serverUpdatedAt: now() },
+        { merge: true },
+      ),
+    );
+    // A stale concurrent write: a withdrawal computed from the old total
+    // (300) is refused now that the total is 200.
+    await assertFails(
+      recordEntry(
+        db(OWNER), goalPath, entries,
+        entryDoc('w3', 'hg', OWNER, 250, 'withdrawal'), 50,
+      ),
+    );
+  });
+
+  // -------------------------------------------------------- shared goals
+
+  const FRIEND = 'friend-uid';
+  const OTHER = 'other-uid';
+  const friendDb = () =>
+    env.authenticatedContext(FRIEND, { email: 'friend@example.com' }).firestore();
+  const otherDb = () =>
+    env.authenticatedContext(OTHER, { email: 'other@example.com' }).firestore();
+
+  const SG = 'sharedGoals/sg';
+  const SG_ENTRIES = `${SG}/entries`;
+  const sharedGoal = (extra = {}) =>
+    goalDoc('sg', {
+      name: 'Friends trip',
+      ownership: 'shared',
+      ownerUid: OWNER,
+      createdBy: OWNER,
+      updatedBy: OWNER,
+      savedMinor: 0,
+      ...extra,
+    });
+  const member = (uid, extra = {}) => ({
+    uid,
+    role: 'member',
+    status: 'active',
+    canContribute: true,
+    canWithdraw: false,
+    displayName: uid,
+    email: null,
+    joinedAt: 1,
+    serverUpdatedAt: now(),
+    ...extra,
+  });
+  const invitation = (code, extra = {}) => ({
+    id: code,
+    goalId: 'sg',
+    goalName: 'Friends trip',
+    invitedEmail: null,
+    invitedBy: OWNER,
+    invitedByName: 'Owner',
+    status: 'pending',
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 86_400_000,
+    updatedAt: Date.now(),
+    serverUpdatedAt: now(),
+    ...extra,
+  });
+
+  async function createSharedGoal() {
+    const client = db(OWNER);
+    const batch = client.batch();
+    batch.set(client.doc(SG), sharedGoal());
+    batch.set(
+      client.doc(`${SG}/members/${OWNER}`),
+      member(OWNER, { role: 'owner', canWithdraw: true }),
+    );
+    batch.set(client.doc(`users/${OWNER}/sharedGoalMemberships/sg`), {
+      goalId: 'sg',
+      joinedAt: 1,
+    });
+    await batch.commit();
+  }
+
+  function accept(client, uid, code, extra = {}) {
+    const batch = client.batch();
+    batch.update(client.doc(`sharedGoalInvitations/${code}`), {
+      status: 'accepted',
+      acceptedBy: uid,
+      acceptedByName: uid,
+      updatedAt: Date.now(),
+      serverUpdatedAt: now(),
+    });
+    batch.set(client.doc(`${SG}/members/${uid}`), {
+      ...member(uid),
+      invitationId: code,
+      ...extra,
+    });
+    batch.set(client.doc(`users/${uid}/sharedGoalMemberships/sg`), {
+      goalId: 'sg',
+      joinedAt: 1,
+    });
+    return batch.commit();
+  }
+
+  test('shared goals: creation and owner-only management', async () => {
+    // Nobody can create a goal owned by someone else.
+    const partner = db(PARTNER);
+    const forged = partner.batch();
+    forged.set(partner.doc(SG), sharedGoal());
+    forged.set(partner.doc(`${SG}/members/${OWNER}`), member(OWNER, { role: 'owner' }));
+    await assertFails(forged.commit());
+
+    await assertSucceeds(createSharedGoal());
+    await assertSucceeds(db(OWNER).doc(SG).get());
+    // Independent of households: household members have no access.
+    await assertFails(db(PARTNER).doc(SG).get());
+    await assertFails(db(STRANGER).doc(`${SG}/members/${OWNER}`).get());
+    // Nobody can make themselves a member without an invitation.
+    await assertFails(
+      db(STRANGER).doc(`${SG}/members/${STRANGER}`).set({
+        ...member(STRANGER),
+        invitationId: 'NOINVITATIONXXXX',
+      }),
+    );
+    // The owner edits details.
+    await assertSucceeds(
+      db(OWNER).doc(SG).set(
+        { name: 'Bali trip', updatedAt: 2, updatedBy: OWNER, serverUpdatedAt: now() },
+        { merge: true },
+      ),
+    );
+  });
+
+  test('shared goals: email invitations, acceptance and permissions', async () => {
+    await createSharedGoal();
+    const code = 'ABCDEFGHJKMNPQRS';
+    // Only the owner invites.
+    await assertFails(
+      db(STRANGER).doc(`sharedGoalInvitations/${code}`).set(
+        invitation(code, { invitedBy: STRANGER }),
+      ),
+    );
+    await assertSucceeds(
+      db(OWNER).doc(`sharedGoalInvitations/${code}`).set(
+        invitation(code, { invitedEmail: 'friend@example.com' }),
+      ),
+    );
+
+    // The invitee sees it by email; someone else cannot list it.
+    await assertSucceeds(
+      friendDb()
+        .collection('sharedGoalInvitations')
+        .where('invitedEmail', '==', 'friend@example.com')
+        .where('status', '==', 'pending')
+        .get(),
+    );
+    await assertFails(
+      otherDb()
+        .collection('sharedGoalInvitations')
+        .where('invitedEmail', '==', 'friend@example.com')
+        .get(),
+    );
+
+    // Bound to the email: another account cannot accept it.
+    await assertFails(accept(otherDb(), OTHER, code));
+    // No extra powers can be taken while joining.
+    await assertFails(accept(friendDb(), FRIEND, code, { canWithdraw: true }));
+    await assertFails(accept(friendDb(), FRIEND, code, { role: 'owner' }));
+    await assertSucceeds(accept(friendDb(), FRIEND, code));
+    await assertSucceeds(friendDb().doc(SG).get());
+
+    // The accepted invitation cannot be used again.
+    await assertFails(accept(otherDb(), OTHER, code));
+
+    // Members contribute in their own name only.
+    await assertSucceeds(
+      recordEntry(friendDb(), SG, SG_ENTRIES, entryDoc('f1', 'sg', FRIEND, 500), 500),
+    );
+    await assertFails(
+      recordEntry(friendDb(), SG, SG_ENTRIES, entryDoc('f2', 'sg', OWNER, 100), 600),
+    );
+    // Members cannot withdraw unless allowed, nor edit the goal.
+    await assertFails(
+      recordEntry(
+        friendDb(), SG, SG_ENTRIES,
+        entryDoc('fw', 'sg', FRIEND, 100, 'withdrawal'), 400,
+      ),
+    );
+    await assertFails(
+      friendDb().doc(SG).set(
+        { name: 'Mine now', updatedAt: 3, updatedBy: FRIEND, serverUpdatedAt: now() },
+        { merge: true },
+      ),
+    );
+    // Members cannot raise their own permissions.
+    await assertFails(
+      friendDb().doc(`${SG}/members/${FRIEND}`).update({ canWithdraw: true }),
+    );
+    // The owner grants withdrawal; then it works.
+    await assertSucceeds(
+      db(OWNER).doc(`${SG}/members/${FRIEND}`).update({
+        status: 'active',
+        canContribute: true,
+        canWithdraw: true,
+        serverUpdatedAt: now(),
+      }),
+    );
+    await assertSucceeds(
+      recordEntry(
+        friendDb(), SG, SG_ENTRIES,
+        entryDoc('fw', 'sg', FRIEND, 100, 'withdrawal'), 400,
+      ),
+    );
+
+    // Removed members lose access, and cannot rejoin on their own.
+    await assertSucceeds(
+      db(OWNER).doc(`${SG}/members/${FRIEND}`).update({
+        status: 'removed',
+        canContribute: true,
+        canWithdraw: true,
+        serverUpdatedAt: now(),
+      }),
+    );
+    await assertFails(friendDb().doc(SG).get());
+    await assertFails(friendDb().doc(`${SG_ENTRIES}/f1`).get());
+    await assertFails(
+      recordEntry(friendDb(), SG, SG_ENTRIES, entryDoc('f3', 'sg', FRIEND, 10), 410),
+    );
+    await assertFails(
+      friendDb().doc(`${SG}/members/${FRIEND}`).update({ status: 'active' }),
+    );
+    // The owner cannot bring them back without a new invitation either.
+    await assertFails(
+      db(OWNER).doc(`${SG}/members/${FRIEND}`).update({
+        status: 'active',
+        canContribute: true,
+        canWithdraw: true,
+        serverUpdatedAt: now(),
+      }),
+    );
+  });
+
+  test('shared goals: codes, rejection, revocation and expiry', async () => {
+    await createSharedGoal();
+    const open = 'CODEAAAAAAAAAAAA';
+    const forFriend = 'CODEBBBBBBBBBBBB';
+    const revoked = 'CODECCCCCCCCCCCC';
+    const expired = 'CODEDDDDDDDDDDDD';
+    for (const [code, extra] of [
+      [open, {}],
+      [forFriend, { invitedEmail: 'friend@example.com' }],
+      [revoked, {}],
+      [expired, { expiresAt: Date.now() - 1000 }],
+    ]) {
+      await assertSucceeds(
+        db(OWNER).doc(`sharedGoalInvitations/${code}`).set(invitation(code, extra)),
+      );
+    }
+    // Codes must be long.
+    await assertFails(
+      db(OWNER).doc('sharedGoalInvitations/SHORT').set(invitation('SHORT')),
+    );
+
+    // Anyone signed in with the code can read and use an open one, once.
+    await assertSucceeds(otherDb().doc(`sharedGoalInvitations/${open}`).get());
+    await assertFails(db(null).doc(`sharedGoalInvitations/${open}`).get());
+    await assertSucceeds(accept(otherDb(), OTHER, open));
+
+    // Only the addressee rejects; only the sender revokes.
+    const status = (s) => ({ status: s, updatedAt: Date.now(), serverUpdatedAt: now() });
+    await assertFails(
+      otherDb().doc(`sharedGoalInvitations/${forFriend}`).update(status('rejected')),
+    );
+    await assertSucceeds(
+      friendDb().doc(`sharedGoalInvitations/${forFriend}`).update(status('rejected')),
+    );
+    await assertFails(accept(friendDb(), FRIEND, forFriend));
+
+    await assertFails(
+      friendDb().doc(`sharedGoalInvitations/${revoked}`).update(status('revoked')),
+    );
+    await assertSucceeds(
+      db(OWNER).doc(`sharedGoalInvitations/${revoked}`).update(status('revoked')),
+    );
+    await assertFails(accept(friendDb(), FRIEND, revoked));
+
+    // Expired invitations cannot be accepted.
+    await assertFails(accept(friendDb(), FRIEND, expired));
+
+    // A member who leaves loses access.
+    await assertSucceeds(
+      otherDb().doc(`${SG}/members/${OTHER}`).update({
+        status: 'left',
+        canContribute: true,
+        canWithdraw: false,
+        serverUpdatedAt: now(),
+      }),
+    );
+    await assertFails(otherDb().doc(SG).get());
+  });
+  // ---------------------------------------------------- notifications
+
+  function device(id, extra = {}) {
+    return {
+      deviceId: id,
+      token: 'fcm-token-1',
+      platform: 'android',
+      currencyCode: 'AED',
+      householdActivity: true,
+      householdBudgets: true,
+      savingsUpdates: false,
+      updatedAt: 1_700_000_000_000,
+      serverUpdatedAt: now(),
+      ...extra,
+    };
+  }
+
+  test('device registrations are private to their owner', async () => {
+    const ref = db(OWNER).doc(`users/${OWNER}/devices/d1`);
+    await assertSucceeds(ref.set(device('d1')));
+    await assertSucceeds(ref.get());
+    await assertSucceeds(ref.set(device('d1', { token: 'rotated' })));
+    await assertFails(db(PARTNER).doc(`users/${OWNER}/devices/d1`).get());
+    await assertFails(
+      db(PARTNER).doc(`users/${OWNER}/devices/d2`).set(device('d2')),
+    );
+    await assertFails(db(PARTNER).doc(`users/${OWNER}/devices/d1`).delete());
+    // Signing out removes the registration.
+    await assertSucceeds(ref.delete());
+  });
+
+  test('device registrations are validated', async () => {
+    const ref = db(OWNER).doc(`users/${OWNER}/devices/d1`);
+    await assertFails(ref.set(device('other')));
+    await assertFails(ref.set(device('d1', { token: '' })));
+    await assertFails(ref.set(device('d1', { platform: 'toaster' })));
+    await assertFails(ref.set(device('d1', { currencyCode: 'DIRHAM' })));
+    await assertFails(ref.set(device('d1', { householdActivity: 'yes' })));
+    await assertFails(ref.set(device('d1', { serverUpdatedAt: 5 })));
+    await assertFails(ref.set(device('d1', { admin: true })));
+  });
+
+  function budgetAlert(uid, id, extra = {}) {
+    return {
+      id,
+      key: 'monthly.20261101',
+      level: 'warning',
+      title: 'Budget warning',
+      message: '92% of the shared monthly budget used. AED 120.00 left.',
+      createdBy: uid,
+      createdByName: 'Omar',
+      createdAt: 1_700_000_000_000,
+      periodEnd: 1_700_100_000_000,
+      serverCreatedAt: now(),
+      ...extra,
+    };
+  }
+
+  test('household budget alerts: members create once, nobody edits', async () => {
+    const id = 'monthly.20261101.warning';
+    const path = `households/${HID}/budgetAlerts/${id}`;
+    await assertFails(db(STRANGER).doc(path).set(budgetAlert(STRANGER, id)));
+    await assertFails(db(REMOVED).doc(path).set(budgetAlert(REMOVED, id)));
+    await assertFails(db(OWNER).doc(path).set(budgetAlert(PARTNER, id)));
+    await assertFails(
+      db(OWNER).doc(path).set(budgetAlert(OWNER, id, { level: 'panic' })),
+    );
+    await assertFails(
+      db(OWNER).doc(path).set(budgetAlert(OWNER, id, { extra: 1 })),
+    );
+    await assertFails(
+      db(OWNER).doc(`households/${HID}/budgetAlerts/bad id!`).set(
+        budgetAlert(OWNER, 'bad id!'),
+      ),
+    );
+    await assertSucceeds(db(OWNER).doc(path).set(budgetAlert(OWNER, id)));
+    await assertSucceeds(db(PARTNER).doc(path).get());
+    await assertFails(db(STRANGER).doc(path).get());
+    // The partner's app sees the same crossing later: already recorded.
+    await assertFails(db(PARTNER).doc(path).set(budgetAlert(PARTNER, id)));
+    await assertFails(db(OWNER).doc(path).delete());
   });
 });

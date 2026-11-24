@@ -1,0 +1,30 @@
+rules_version = '2';
+
+// MoneyMate Cloud Storage rules.
+//
+// The only files are profile photos at users/{uid}/profile/avatar.jpg.
+// Each signed-in user can write and delete only their own photo, which must
+// be a JPEG under 1 MB (the app uploads a 512 x 512 JPEG; see
+// ProfilePhotoLimits in lib/core/services/profile_photo_service.dart).
+// Photos are shown to household members through the download URL on the
+// account, so reads are limited to signed-in users. Everything else is
+// denied.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /users/{uid}/profile/avatar.jpg {
+      allow read: if request.auth != null;
+
+      allow create, update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.size > 0
+        && request.resource.size < 1024 * 1024
+        && request.resource.contentType == 'image/jpeg';
+
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

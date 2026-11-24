@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/services/notification_events.dart';
 import '../core/services/recurring_scheduler.dart';
 import '../models/recurring_model.dart';
 import '../models/transaction_model.dart';
@@ -16,11 +17,19 @@ import 'transaction_provider.dart';
 /// are serialised, and every occurrence has a stable ID, so nothing is
 /// ever added twice. Without a repository the feature is unavailable.
 class RecurringProvider extends ChangeNotifier {
-  RecurringProvider(this._repository, {Uuid? uuid, DateTime Function()? clock})
-    : _uuid = uuid ?? const Uuid(),
-      _clock = clock ?? DateTime.now;
+  RecurringProvider(
+    this._repository, {
+    RecurringSink? sink,
+    Uuid? uuid,
+    DateTime Function()? clock,
+  }) : _sink = sink,
+       _uuid = uuid ?? const Uuid(),
+       _clock = clock ?? DateTime.now;
 
   final RecurringRepository? _repository;
+
+  /// Told about occurrences added automatically (a system notification).
+  final RecurringSink? _sink;
   final Uuid _uuid;
   final DateTime Function() _clock;
 
@@ -71,6 +80,7 @@ class RecurringProvider extends ChangeNotifier {
     final repository = _repository;
     if (repository == null) return 0;
     var added = 0;
+    final additions = <RecurringAddition>[];
     try {
       final now = _clock();
       for (final rule in await repository.getRules()) {
@@ -78,12 +88,15 @@ class RecurringProvider extends ChangeNotifier {
         if (rule.isShared && rule.householdId != _householdId) continue;
         final due = RecurringScheduler.due(rule, now);
         if (due.isEmpty) continue;
-        added += await repository.commit(due);
+        final count = await repository.commit(due);
+        added += count;
+        if (count > 0) additions.add(RecurringAddition(rule, count));
       }
     } catch (e) {
       debugPrint('Adding recurring transactions failed: $e');
     }
     await _afterRun(added);
+    if (additions.isNotEmpty) unawaited(_sink?.recurringAdded(additions));
     return added;
   });
 

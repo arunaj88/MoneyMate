@@ -1,0 +1,105 @@
+import 'dart:async';
+
+import 'package:money_mate/core/services/notification_cloud.dart';
+import 'package:money_mate/core/services/notification_service.dart';
+
+/// In-memory [PushMessaging]: the permission prompt answers with
+/// [answer], and tests push foreground messages and token refreshes.
+class FakePushMessaging implements PushMessaging {
+  FakePushMessaging({
+    this.current = NotificationPermission.notDetermined,
+    this.answer = NotificationPermission.granted,
+    this.currentToken = 'token-1',
+  });
+
+  NotificationPermission current;
+
+  /// What the system prompt returns.
+  NotificationPermission answer;
+  String? currentToken;
+  int prompts = 0;
+  int deletedTokens = 0;
+
+  final _messages = StreamController<AppNotification>.broadcast();
+  final _tokens = StreamController<String>.broadcast();
+
+  void receive(AppNotification n) => _messages.add(n);
+
+  void refreshToken(String token) {
+    currentToken = token;
+    _tokens.add(token);
+  }
+
+  @override
+  String get platform => 'android';
+
+  @override
+  Future<NotificationPermission> permission() async => current;
+
+  @override
+  Future<NotificationPermission> requestPermission() async {
+    prompts++;
+    if (current == NotificationPermission.notDetermined) current = answer;
+    return current;
+  }
+
+  @override
+  Future<String?> token() async => currentToken;
+
+  @override
+  Stream<String> get tokenRefreshes => _tokens.stream;
+
+  @override
+  Stream<AppNotification> get foregroundMessages => _messages.stream;
+
+  @override
+  Future<void> deleteToken() async {
+    deletedTokens++;
+    currentToken = 'token-after-${deletedTokens + 1}';
+  }
+}
+
+/// Records what would be shown on the device.
+class RecordingLocalNotifier implements LocalNotifier {
+  final List<AppNotification> shown = [];
+
+  @override
+  Future<void> show(AppNotification notification) async =>
+      shown.add(notification);
+}
+
+/// In-memory [NotificationCloud] keyed like Firestore.
+class FakeNotificationCloud implements NotificationCloud {
+  /// users/{uid}/devices/{deviceId}
+  final Map<String, DeviceRegistration> devices = {};
+
+  /// households/{hid}/budgetAlerts/{id} → createdBy
+  final Map<String, String> budgetAlerts = {};
+  final List<HouseholdBudgetAlert> published = [];
+  int registrations = 0;
+  bool offline = false;
+
+  @override
+  Future<void> register(String uid, DeviceRegistration registration) async {
+    if (offline) throw TimeoutException('offline');
+    registrations++;
+    devices['$uid/${registration.deviceId}'] = registration;
+  }
+
+  @override
+  Future<void> unregister(String uid, String deviceId) async {
+    if (offline) throw TimeoutException('offline');
+    devices.remove('$uid/$deviceId');
+  }
+
+  @override
+  Future<void> publishBudgetAlert(
+    HouseholdBudgetAlert alert, {
+    required String uid,
+    String? userName,
+  }) async {
+    published.add(alert);
+    // Like the rules: the first writer wins.
+    budgetAlerts.putIfAbsent('${alert.householdId}/${alert.id}', () => uid);
+  }
+}

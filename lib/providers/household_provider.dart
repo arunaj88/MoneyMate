@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/constants/app_constants.dart';
 import '../core/services/household_service.dart';
+import '../models/app_user.dart';
 import '../models/household_models.dart';
 import 'auth_provider.dart';
 
@@ -70,6 +71,11 @@ class HouseholdProvider extends ChangeNotifier {
 
   String? _uid;
   String? _userEmail;
+  AppUser? _user;
+
+  /// Profile last sent to [HouseholdService.refreshMemberProfile], so a
+  /// member document that is slow to change is not refreshed repeatedly.
+  String? _profileSyncKey;
   HouseholdPhase _phase = HouseholdPhase.signedOut;
   Household? _household;
   List<HouseholdMember> _members = const [];
@@ -164,8 +170,13 @@ class HouseholdProvider extends ChangeNotifier {
   void updateAuth(AuthProvider auth) {
     final user = auth.isAuthenticated ? auth.user : null;
     _userEmail = user?.email;
+    _user = user;
     final uid = user?.uid;
-    if (uid == _uid) return;
+    if (uid == _uid) {
+      _syncMemberProfile();
+      return;
+    }
+    _profileSyncKey = null;
     _uid = uid;
     _cancelAll();
     _household = null;
@@ -257,7 +268,40 @@ class HouseholdProvider extends ChangeNotifier {
       _members = list;
       _saveCache();
       _notify();
+      _syncMemberProfile();
     }, onError: (Object e) => debugPrint('Members stream: $e'));
+  }
+
+  /// Asks the server to copy the user's current name and photo to their
+  /// member document when it is out of date (e.g. after a photo change), so
+  /// the other members see it. Member documents are written by Cloud
+  /// Functions only. Best effort: a failure is retried on the next change.
+  void _syncMemberProfile() {
+    final service = _service;
+    final householdId = _household?.id;
+    final user = _user;
+    final me = currentMember;
+    if (service == null ||
+        householdId == null ||
+        user == null ||
+        me == null ||
+        !me.isActive ||
+        me.uid != user.uid) {
+      return;
+    }
+    final photoChanged = (me.photoUrl ?? '') != (user.photoUrl ?? '');
+    final nameChanged =
+        user.hasName && user.displayName!.trim() != (me.displayName ?? '');
+    if (!photoChanged && !nameChanged) return;
+    final key = '$householdId|${user.displayName}|${user.photoUrl}';
+    if (_profileSyncKey == key) return;
+    _profileSyncKey = key;
+    unawaited(
+      service.refreshMemberProfile(householdId).catchError((Object e) {
+        debugPrint('Refreshing the member profile failed: $e');
+        if (_profileSyncKey == key) _profileSyncKey = null;
+      }),
+    );
   }
 
   /// Only the owner may read invitations.

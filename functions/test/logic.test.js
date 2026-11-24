@@ -116,3 +116,36 @@ test('member profile comes from the ID token', () => {
   );
   assert.equal(logic.displayName({ token: { email: 'omar@example.com' } }), 'omar');
 });
+
+test('only https photo URLs are stored on member documents', () => {
+  assert.equal(logic.safePhotoUrl('https://example.com/a.jpg'), 'https://example.com/a.jpg');
+  assert.equal(logic.safePhotoUrl('http://example.com/a.jpg'), null);
+  assert.equal(logic.safePhotoUrl('javascript:alert(1)'), null);
+  assert.equal(logic.safePhotoUrl('not a url'), null);
+  assert.equal(logic.safePhotoUrl(42), null);
+  assert.equal(logic.safePhotoUrl(`https://e.com/${'a'.repeat(3000)}`), null);
+  assert.equal(
+    logic.memberProfile({ token: { picture: 'http://insecure' } }).photoUrl,
+    null,
+  );
+});
+
+test('account profile comes from the auth user record', () => {
+  assert.deepEqual(
+    logic.accountProfile({
+      displayName: 'Sara',
+      email: 's@example.com',
+      photoURL: 'https://firebasestorage.googleapis.com/v0/b/x/o/a?alt=media',
+    }),
+    {
+      displayName: 'Sara',
+      email: 's@example.com',
+      photoUrl: 'https://firebasestorage.googleapis.com/v0/b/x/o/a?alt=media',
+    },
+  );
+  assert.deepEqual(logic.accountProfile({}), {
+    displayName: null,
+    email: null,
+    photoUrl: null,
+  });
+});

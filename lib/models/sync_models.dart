@@ -391,6 +391,20 @@ class SyncReport {
   /// Budget and category changes uploaded.
   int settingsUploaded = 0;
 
+  /// Savings goals, entries and deletions uploaded.
+  int savingsUploaded = 0;
+
+  /// Savings goal and entry documents applied locally from the cloud.
+  int savingsDownloaded = 0;
+
+  /// True when the cloud refused access to the savings collections (rules
+  /// not deployed yet); savings stay on this device until it is allowed.
+  bool savingsUnavailable = false;
+
+  /// Shared goals removed from this device because the user no longer has
+  /// access (removed, left or the goal was deleted).
+  int sharedGoalsReleased = 0;
+
   /// Households whose cloud data could not be read because this user is no
   /// longer an active member.
   final Set<String> householdsDenied = {};
@@ -415,7 +429,9 @@ class SyncReport {
       conflictsWonByCloud > 0 ||
       archivedLocally > 0 ||
       categoriesDownloaded > 0 ||
-      budgetsDownloaded > 0;
+      budgetsDownloaded > 0 ||
+      savingsDownloaded > 0 ||
+      sharedGoalsReleased > 0;
 
   void addAll(SyncReport other) {
     uploaded += other.uploaded;
@@ -428,6 +444,10 @@ class SyncReport {
     budgetsDownloaded += other.budgetsDownloaded;
     categoriesDownloaded += other.categoriesDownloaded;
     settingsUploaded += other.settingsUploaded;
+    savingsUploaded += other.savingsUploaded;
+    savingsDownloaded += other.savingsDownloaded;
+    savingsUnavailable |= other.savingsUnavailable;
+    sharedGoalsReleased += other.sharedGoalsReleased;
     householdsDenied.addAll(other.householdsDenied);
     resetApplied |= other.resetApplied;
     restorePending |= other.restorePending;
@@ -440,5 +460,7 @@ class SyncReport {
       'downloaded: $downloaded, deletedFromCloud: $deletedFromCloud, '
       'conflictsWonByCloud: $conflictsWonByCloud, failed: $failed, '
       'archivedLocally: $archivedLocally, budgetsDownloaded: '
-      '$budgetsDownloaded, categoriesDownloaded: $categoriesDownloaded)';
+      '$budgetsDownloaded, categoriesDownloaded: $categoriesDownloaded, '
+      'savingsUploaded: $savingsUploaded, savingsDownloaded: '
+      '$savingsDownloaded)';
 }

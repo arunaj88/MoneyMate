@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
@@ -6,6 +8,8 @@ import '../core/constants/app_constants.dart';
 import '../core/services/budget_calculator.dart';
 import '../core/services/cloud_history_loader.dart';
 import '../core/services/historical_totals.dart';
+import '../core/services/notification_cloud.dart';
+import '../core/services/notification_events.dart';
 import '../core/utils/date_range.dart';
 import '../core/utils/money.dart';
 import '../models/budget_model.dart';
@@ -56,9 +60,11 @@ class BudgetProvider extends ChangeNotifier {
     required TransactionRepository transactionRepository,
     required AppSettingsRepository appSettingsRepository,
     TransactionHistorySource? history,
+    BudgetAlertSink? alertSink,
     DateTime Function()? clock,
     Uuid? uuid,
   }) : _budgets = budgetRepository,
+       _alertSink = alertSink,
        _transactions = transactionRepository,
        _appSettings = appSettingsRepository,
        _history = history,
@@ -71,6 +77,9 @@ class BudgetProvider extends ChangeNotifier {
   final TransactionRepository _transactions;
   final AppSettingsRepository _appSettings;
   final TransactionHistorySource? _history;
+
+  /// System notifications and household pushes for new alerts.
+  final BudgetAlertSink? _alertSink;
   final DateTime Function() _clock;
   final Uuid _uuid;
 
@@ -447,11 +456,13 @@ class BudgetProvider extends ChangeNotifier {
       String scope,
       String name,
       BudgetStatus? status,
-      bool enabled,
-    ) async {
+      bool enabled, {
+      String? householdId,
+      String? cloudScope,
+    }) async {
       if (status == null) return;
-      final key =
-          '$_alertKeyPrefix$scope.${DateFormat('yyyyMMdd').format(status.range.start)}';
+      final period = DateFormat('yyyyMMdd').format(status.range.start);
+      final key = '$_alertKeyPrefix$scope.$period';
       final previous = BudgetAlertLevel
           .values[int.tryParse(stored[key] ?? '')?.clamp(0, 3) ?? 0];
       final current = status.alertLevel;
@@ -459,8 +470,26 @@ class BudgetProvider extends ChangeNotifier {
       // Persist the new level first so the alert never fires twice for the
       // same threshold in the same period, even across app restarts.
       await _appSettings.set(key, current.index.toString());
-      if (enabled && current > previous) {
-        _pendingAlerts.add(_buildAlert(key, name, status));
+      if (!(current > previous)) return;
+      final local = enabled ? _buildAlert(key, name, status) : null;
+      if (local != null) _pendingAlerts.add(local);
+      // The other members are told whatever this user's own settings are.
+      final household = householdId == null
+          ? null
+          : HouseholdBudgetAlert(
+              householdId: householdId,
+              key: '$cloudScope.$period',
+              level: current.name,
+              title: BudgetCalculator.alertTitle(current),
+              message: _householdMessage(name, status),
+              periodEnd: status.range.end,
+            );
+      if (local != null || household != null) {
+        unawaited(
+          _alertSink?.budgetAlertRaised(
+            BudgetAlertEvent(local: local, household: household),
+          ),
+        );
       }
     }
 
@@ -468,17 +497,22 @@ class BudgetProvider extends ChangeNotifier {
       // Personal keys are unchanged from earlier versions.
       final prefix = set.scope.isPersonal ? '' : 'h.${set.scope.householdId}.';
       final label = set.scope.isPersonal ? '' : 'shared ';
+      final householdId = set.scope.householdId;
       await check(
         '${prefix}weekly',
         '${label}weekly budget',
         set.weekly,
         _budgetAlertsEnabled,
+        householdId: householdId,
+        cloudScope: 'weekly',
       );
       await check(
         '${prefix}monthly',
         '${label}monthly budget',
         set.monthly,
         _budgetAlertsEnabled,
+        householdId: householdId,
+        cloudScope: 'monthly',
       );
       for (final s in set.categoryStatuses) {
         final category = _categories[s.budget.categoryId];
@@ -488,9 +522,27 @@ class BudgetProvider extends ChangeNotifier {
               'budget',
           s.status,
           _categoryAlertsEnabled,
+          householdId: householdId,
+          cloudScope: 'cat.${s.budget.id}',
         );
       }
     }
+  }
+
+  /// The alert as the other household members read it.
+  String _householdMessage(String name, BudgetStatus status) {
+    final percent = status.usagePercent?.toStringAsFixed(0) ?? '0';
+    final remaining = status.remainingMinor ?? 0;
+    final used = '$percent% of the $name used.';
+    return switch (status.alertLevel) {
+      BudgetAlertLevel.exceeded =>
+        '$used Over by ${_formatter.format(-remaining)}.',
+      BudgetAlertLevel.warning =>
+        '$used Only ${_formatter.format(remaining)} left.',
+      BudgetAlertLevel.approaching =>
+        '$used ${_formatter.format(remaining)} remaining.',
+      BudgetAlertLevel.none => used,
+    };
   }
 
   BudgetAlert _buildAlert(String key, String name, BudgetStatus status) {

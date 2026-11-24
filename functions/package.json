@@ -1,14 +1,14 @@
 {
   "name": "moneymate-functions",
-  "description": "MoneyMate Cloud Functions: trusted household and invitation management",
+  "description": "MoneyMate Cloud Functions: household management and push notifications",
   "private": true,
   "main": "index.js",
   "engines": {
     "node": "22"
   },
   "scripts": {
-    "test:unit": "node --test test/logic.test.js",
-    "test": "firebase emulators:exec --only firestore --project demo-moneymate \"node --test --test-concurrency=1 test/*.test.js\"",
+    "test:unit": "node --test test/logic.test.js test/notify_logic.test.js",
+    "test": "firebase emulators:exec --only firestore,storage --project demo-moneymate \"node --test --test-concurrency=1 test/*.test.js\"",
     "serve": "firebase emulators:start --only functions,firestore",
     "deploy": "firebase deploy --only functions"
   },

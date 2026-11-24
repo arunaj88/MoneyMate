@@ -12,6 +12,8 @@ class BalanceCard extends StatelessWidget {
     required this.monthExpenseMinor,
     required this.formatter,
     this.title = 'Total balance',
+    this.savedMinor,
+    this.onSavingsTap,
   });
 
   /// Label above the balance (e.g. "Household balance").
@@ -21,6 +23,10 @@ class BalanceCard extends StatelessWidget {
   final int monthIncomeMinor;
   final int monthExpenseMinor;
   final CurrencyFormatter formatter;
+
+  /// Money held in savings goals, shown under the balance when not null.
+  final int? savedMinor;
+  final VoidCallback? onSavingsTap;
 
   @override
   Widget build(BuildContext context) {
@@ -99,6 +105,53 @@ class BalanceCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (savedMinor != null) ...[
+                  const SizedBox(height: Spacing.sm),
+                  Material(
+                    color: Colors.white.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(20),
+                    child: InkWell(
+                      key: const Key('balanceSavingsChip'),
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: onSavingsTap,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.savings_outlined,
+                              size: 16,
+                              color: onCard,
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                'In savings: ${formatter.format(savedMinor!)}',
+                                key: const Key('balanceSavedText'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: onCard,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            if (onSavingsTap != null)
+                              const Icon(
+                                Icons.chevron_right_rounded,
+                                size: 16,
+                                color: onCard,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: Spacing.xl),
                 Row(
                   children: [

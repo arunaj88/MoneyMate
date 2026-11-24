@@ -4,6 +4,8 @@ import 'package:money_mate/app/app_dependencies.dart';
 import 'package:money_mate/app/money_mate_app.dart';
 import 'package:money_mate/core/services/data_reset_service.dart';
 import 'package:money_mate/core/services/household_service.dart';
+import 'package:money_mate/core/services/photo_picker.dart';
+import 'package:money_mate/core/services/profile_photo_service.dart';
 import 'package:money_mate/models/app_user.dart';
 import 'package:money_mate/models/transaction_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -18,7 +20,11 @@ class TestHarness {
     AppUser? user = testUser,
     this.households,
     this.dataReset,
-  }) : auth = FakeAuthService(signedIn: user),
+    bool withSavings = false,
+    this.photos,
+    this.photoPicker,
+  }) : savings = withSavings ? InMemorySavingsRepository() : null,
+       auth = FakeAuthService(signedIn: user),
        transactions = InMemoryTransactionRepository(initial: transactions),
        categories = InMemoryCategoryRepository(),
        budgets = InMemoryBudgetRepository(),
@@ -33,11 +39,18 @@ class TestHarness {
   final InMemoryAppSettingsRepository appSettings;
   late final InMemoryRecurringRepository recurring;
 
+  /// Savings goals; null (the default) leaves the feature hidden.
+  final InMemorySavingsRepository? savings;
+
   /// Household management; null leaves households unavailable.
   final HouseholdService? households;
 
   /// Reset App; null hides it.
   final DataResetService? dataReset;
+
+  /// Profile photo storage and picker; both are needed for "Change photo".
+  final ProfilePhotoService? photos;
+  final PhotoPicker? photoPicker;
 
   /// Pumps the app on a 390x844 phone by default; pass [logicalSize],
   /// [devicePixelRatio] and system [padding] (status bar, notch, home
@@ -75,6 +88,9 @@ class TestHarness {
           householdService: households,
           dataResetService: dataReset,
           recurringRepository: recurring,
+          savingsRepository: savings,
+          profilePhotoService: photos,
+          photoPicker: photoPicker,
         ),
         minSplashDuration: Duration.zero,
       ),

@@ -56,14 +56,7 @@ class FirebaseAuthService implements AuthService {
   final GoogleSignIn _googleSignIn;
   Future<void>? _googleInit;
 
-  static AppUser? _map(User? user) => user == null
-      ? null
-      : AppUser(
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName,
-          photoUrl: user.photoURL,
-        );
+  static AppUser? _map(User? user) => appUserFromFirebase(user);
 
   @override
   Stream<AppUser?> authStateChanges() => _auth.authStateChanges().map(_map);
@@ -177,6 +170,16 @@ class FirebaseAuthService implements AuthService {
     }
   }
 }
+
+/// The app's view of a Firebase [user].
+AppUser? appUserFromFirebase(User? user) => user == null
+    ? null
+    : AppUser(
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName,
+        photoUrl: user.photoURL,
+      );
 
 /// User-facing message for a Firebase Authentication error code.
 String firebaseAuthMessage(String code) {

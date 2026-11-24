@@ -8,6 +8,7 @@ import '../models/report_models.dart';
 import '../models/transaction_model.dart';
 import '../repositories/transaction_repository.dart';
 import 'category_provider.dart';
+import 'savings_provider.dart';
 import 'settings_provider.dart';
 import 'transaction_provider.dart';
 
@@ -23,6 +24,7 @@ class DashboardData {
     required this.recentTransactions,
     required this.monthCategoryShares,
     this.scope = const ScopeFilter.personal(),
+    this.savedMinor = 0,
   });
 
   /// Which transactions these figures cover.
@@ -30,6 +32,16 @@ class DashboardData {
 
   /// All-time income minus all-time expenses.
   final int balanceMinor;
+
+  /// Money currently set aside in savings goals (personal view only; 0 for
+  /// the household view). Savings are transfers, not expenses, so they are
+  /// never part of [balanceMinor], [week] or [month].
+  final int savedMinor;
+
+  /// Money not set aside in savings: [balanceMinor] minus [savedMinor].
+  /// Adding to a goal lowers it by the same amount the savings total
+  /// rises; a withdrawal does the opposite.
+  int get availableMinor => balanceMinor - savedMinor;
   final PeriodTotals week;
   final PeriodTotals month;
   final int previousWeekExpenseMinor;
@@ -37,6 +49,19 @@ class DashboardData {
   final List<DailyTotal> weekDailyExpenses;
   final List<TransactionModel> recentTransactions;
   final List<CategoryShare> monthCategoryShares;
+
+  DashboardData withSaved(int savedMinor) => DashboardData(
+    balanceMinor: balanceMinor,
+    week: week,
+    month: month,
+    previousWeekExpenseMinor: previousWeekExpenseMinor,
+    previousMonthExpenseMinor: previousMonthExpenseMinor,
+    weekDailyExpenses: weekDailyExpenses,
+    recentTransactions: recentTransactions,
+    monthCategoryShares: monthCategoryShares,
+    scope: scope,
+    savedMinor: savedMinor,
+  );
 
   double? get weekChangePercent => TransactionCalculator.percentChange(
     week.expenseMinor,
@@ -80,6 +105,8 @@ class DashboardProvider extends ChangeNotifier {
   Map<String, CategoryModel> _categories = const {};
   ScopeFilter _scope = const ScopeFilter.personal();
   Object? _dependencyKey;
+  int _savedMinor = 0;
+  SavingsProvider? _savings;
 
   DashboardData? get data => _data;
   bool get isLoading => _isLoading;
@@ -89,12 +116,26 @@ class DashboardProvider extends ChangeNotifier {
       _data!.recentTransactions.isEmpty &&
       _data!.balanceMinor == 0;
 
-  /// Wired through ChangeNotifierProxyProvider3 in main.dart.
+  /// Wired through ChangeNotifierProxyProvider4 in money_mate_app.dart.
+  ///
+  /// A savings change only updates the available balance from
+  /// [SavingsProvider.totalSavedMinor]; nothing is queried again.
   void updateDependencies(
     SettingsProvider settings,
     CategoryProvider categories,
-    TransactionProvider transactions,
-  ) {
+    TransactionProvider transactions, [
+    SavingsProvider? savings,
+  ]) {
+    _savings = savings;
+    final saved = savings?.savedForScope(transactions.scopeFilter) ?? 0;
+    if (saved != _savedMinor) {
+      _savedMinor = saved;
+      final data = _data;
+      if (data != null && data.scope == transactions.scopeFilter) {
+        _data = data.withSaved(saved);
+        Future.microtask(notifyListeners);
+      }
+    }
     _firstDayOfWeek = settings.firstDayOfWeek;
     _categories = categories.byId;
     _scope = transactions.scopeFilter;
@@ -174,6 +215,9 @@ class DashboardProvider extends ChangeNotifier {
           _categories,
         ),
         scope: scope,
+        // Personal goals reduce the personal balance, the household's goals
+        // the household balance; shared goals neither.
+        savedMinor: _savings?.savedForScope(scope) ?? 0,
       );
     } catch (e) {
       if (token != _loadToken) return;

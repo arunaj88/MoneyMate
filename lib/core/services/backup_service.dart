@@ -6,6 +6,7 @@ import 'package:sqflite/sqflite.dart';
 import '../../models/budget_model.dart';
 import '../../models/category_model.dart';
 import '../../models/recurring_model.dart';
+import '../../models/savings_model.dart';
 import '../../models/transaction_model.dart';
 import '../constants/app_constants.dart';
 import '../database/app_database.dart';
@@ -31,6 +32,8 @@ class BackupContents {
     required this.categoryBudgets,
     required this.settings,
     this.recurringRules = const [],
+    this.savingsGoals = const [],
+    this.savingsEntries = const [],
   });
 
   final DateTime? exportedAt;
@@ -43,6 +46,10 @@ class BackupContents {
   /// Personal recurring rules (absent from backups made before they
   /// existed).
   final List<RecurringRule> recurringRules;
+
+  /// Savings goals and their history (absent from older backups).
+  final List<SavingsGoal> savingsGoals;
+  final List<SavingsEntry> savingsEntries;
 }
 
 /// Creates and restores JSON backups and exports CSV files.
@@ -193,6 +200,27 @@ abstract class BackupService {
       }
     }
 
+    final savingsGoals = parseList('savingsGoals', SavingsGoal.fromJson);
+    final savingsEntries = parseList('savingsEntries', SavingsEntry.fromJson);
+    final goalIds = {for (final g in savingsGoals) g.id};
+    if (goalIds.length != savingsGoals.length) {
+      throw const BackupFormatException('Duplicate savings goal id.');
+    }
+    final balances = <String, int>{};
+    for (final e in savingsEntries) {
+      if (!goalIds.contains(e.goalId)) {
+        throw const BackupFormatException(
+          'A savings entry references an unknown goal.',
+        );
+      }
+      balances[e.goalId] = (balances[e.goalId] ?? 0) + e.signedMinor;
+    }
+    if (balances.values.any((b) => b < 0)) {
+      throw const BackupFormatException(
+        'A savings goal has more withdrawn than saved.',
+      );
+    }
+
     final settings = data['settings'];
     return BackupContents(
       exportedAt: DateTime.tryParse(decoded['exportedAt']?.toString() ?? ''),
@@ -202,6 +230,8 @@ abstract class BackupService {
       categoryBudgets: categoryBudgets,
       settings: settings is Map<String, dynamic> ? settings : const {},
       recurringRules: recurringRules,
+      savingsGoals: savingsGoals,
+      savingsEntries: savingsEntries,
     );
   }
 }
@@ -237,6 +267,20 @@ class SqliteBackupService implements BackupService {
       where: "household_id = ''",
       orderBy: 'created_at',
     );
+    // Personal goals only: household and shared goals belong to other
+    // people too and live in the cloud.
+    final savingsGoals = await _db.query(
+      Tables.savingsGoals,
+      where: "ownership = 'personal'",
+      orderBy: 'created_at',
+    );
+    final savingsEntries = await _db.query(
+      Tables.savingsEntries,
+      where:
+          'goal_id IN (SELECT id FROM ${Tables.savingsGoals} '
+          "WHERE ownership = 'personal')",
+      orderBy: 'date, created_at',
+    );
 
     final document = {
       'app': AppConstants.backupAppId,
@@ -260,6 +304,12 @@ class SqliteBackupService implements BackupService {
             .toList(growable: false),
         'recurringRules': recurringRules
             .map((r) => RecurringRule.fromMap(r).toJson())
+            .toList(growable: false),
+        'savingsGoals': savingsGoals
+            .map((g) => SavingsGoal.fromMap(g).toJson())
+            .toList(growable: false),
+        'savingsEntries': savingsEntries
+            .map((e) => SavingsEntry.fromMap(e).toJson())
             .toList(growable: false),
         'settings': settings ?? const <String, Object>{},
       },
@@ -319,6 +369,40 @@ class SqliteBackupService implements BackupService {
       await txn.delete(Tables.budgets, where: "household_id = ''");
       await txn.delete(Tables.transactions, where: "scope = 'personal'");
       await txn.delete(Tables.recurringRules, where: "household_id = ''");
+      // Savings are replaced too. Goals left out of the backup are deleted
+      // everywhere; restored ones are uploaded again (same IDs, so no
+      // duplicates in the cloud).
+      final restoredGoals = {for (final g in contents.savingsGoals) g.id};
+      final restoredEntries = {for (final e in contents.savingsEntries) e.id};
+      const personalGoals =
+          "SELECT id FROM ${Tables.savingsGoals} WHERE ownership = 'personal'";
+      for (final (table, collection, keep, where) in [
+        (
+          Tables.savingsEntries,
+          'savingsEntries',
+          restoredEntries,
+          'goal_id IN ($personalGoals)',
+        ),
+        (
+          Tables.savingsGoals,
+          'savingsGoals',
+          restoredGoals,
+          "ownership = 'personal'",
+        ),
+      ]) {
+        final rows = await txn.query(table, columns: ['id'], where: where);
+        for (final row in rows) {
+          final id = row['id']! as String;
+          if (keep.contains(id)) continue;
+          await txn.insert(Tables.cloudTombstones, {
+            'collection': collection,
+            'household_id': '',
+            'id': id,
+            'deleted_at': now,
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+        await txn.delete(table, where: where);
+      }
       // Categories still used by shared records are kept.
       await txn.rawDelete(
         'DELETE FROM ${Tables.categories} WHERE '
@@ -422,6 +506,32 @@ class SqliteBackupService implements BackupService {
           ...r.toMap(),
           'category_id': idMap[r.categoryId] ?? r.categoryId,
         }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      for (final g in contents.savingsGoals) {
+        // A newer change time, so the restored version wins everywhere.
+        dataBatch.insert(Tables.savingsGoals, {
+          ...g.toMap(),
+          'updated_at': now,
+          'sync_status': RecordSyncStatus.pending.name,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        dataBatch.delete(
+          Tables.cloudTombstones,
+          where: "collection = 'savingsGoals' AND household_id = '' AND id = ?",
+          whereArgs: [g.id],
+        );
+      }
+      for (final e in contents.savingsEntries) {
+        dataBatch.insert(Tables.savingsEntries, {
+          ...e.toMap(),
+          'updated_at': now,
+          'sync_status': RecordSyncStatus.pending.name,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        dataBatch.delete(
+          Tables.cloudTombstones,
+          where:
+              "collection = 'savingsEntries' AND household_id = '' AND id = ?",
+          whereArgs: [e.id],
+        );
       }
       await dataBatch.commit(noResult: true);
     });

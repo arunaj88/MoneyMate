@@ -1,6 +1,8 @@
 import 'package:money_mate/core/services/cloud_transaction_store.dart';
 import 'package:money_mate/models/sync_models.dart';
 
+export 'fake_savings_cloud.dart';
+
 /// In-memory stand-in for Firestore. Batches share one server timestamp
 /// (like Firestore), documents can only be written, never removed, and the
 /// store can be switched offline or made to lose writes.

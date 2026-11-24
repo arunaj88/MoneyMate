@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:money_mate/core/services/household_service.dart';
+import 'package:money_mate/models/app_user.dart';
 import 'package:money_mate/models/household_models.dart';
 
 /// In-memory [HouseholdService] that behaves like the Cloud Functions for
@@ -80,9 +81,19 @@ class FakeHouseholdService implements HouseholdService {
   }
 
   @override
-  Stream<List<HouseholdMember>> watchMembers(String householdId) async* {
-    yield members;
-    yield* _members.stream;
+  Stream<List<HouseholdMember>> watchMembers(String householdId) {
+    // Like a Firestore snapshot listener: the current list first, then every
+    // change, with none lost between the two.
+    StreamSubscription<List<HouseholdMember>>? changes;
+    late final StreamController<List<HouseholdMember>> controller;
+    controller = StreamController<List<HouseholdMember>>(
+      onListen: () {
+        controller.add(members);
+        changes = _members.stream.listen(controller.add);
+      },
+      onCancel: () => changes?.cancel(),
+    );
+    return controller.stream;
   }
 
   @override
@@ -222,5 +233,33 @@ class FakeHouseholdService implements HouseholdService {
     membershipIds = [];
     household = null;
     _publish();
+  }
+
+  /// The account as the server sees it; [refreshMemberProfile] copies its
+  /// name and photo to this user's member document.
+  AppUser? Function()? account;
+
+  @override
+  Future<void> refreshMemberProfile(String householdId) async {
+    calls.add('refreshProfile');
+    await _check();
+    final profile = account?.call();
+    if (profile == null) return;
+    members = [
+      for (final m in members)
+        if (m.uid == uid)
+          HouseholdMember(
+            uid: m.uid,
+            role: m.role,
+            status: m.status,
+            displayName: profile.displayName,
+            email: profile.email,
+            photoUrl: profile.photoUrl,
+            joinedAt: m.joinedAt,
+          )
+        else
+          m,
+    ];
+    _members.add(members);
   }
 }

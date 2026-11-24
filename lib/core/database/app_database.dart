@@ -30,6 +30,20 @@ class Tables {
   /// Recurring transaction rules (e.g. a monthly salary), kept on the
   /// device that created them.
   static const String recurringRules = 'recurring_rules';
+
+  /// Personal savings goals. Never removed by the retention clean-up.
+  static const String savingsGoals = 'savings_goals';
+
+  /// Contributions to and withdrawals from savings goals (transfers, not
+  /// income or expenses).
+  static const String savingsEntries = 'savings_entries';
+
+  /// Members of independent shared goals, as last read from the cloud.
+  static const String savingsMembers = 'savings_members';
+
+  /// Shared-goal invitations the user sent or received, as last read from
+  /// the cloud.
+  static const String savingsInvitations = 'savings_invitations';
 }
 
 /// Cloud sync state of a local row (`transactions.sync_status`).
@@ -118,7 +132,131 @@ class AppDatabase {
     2: _migrateToV2,
     3: _migrateToV3,
     4: _migrateToV4,
+    5: _migrateToV5,
+    6: _migrateToV6,
   };
+
+  /// v6: household and independent shared savings goals.
+  ///
+  /// * Goals get an ownership ('personal' / 'household' / 'shared'), the
+  ///   household of household goals ('' otherwise) and who created / last
+  ///   changed them. Every existing goal stays personal.
+  /// * Entries record who made them.
+  /// * Members and invitations of shared goals are cached so the goals can
+  ///   be shown offline.
+  static Future<void> _migrateToV6(Database db) async {
+    final batch = db.batch();
+    batch.execute(
+      'ALTER TABLE ${Tables.savingsGoals} ADD COLUMN ownership TEXT NOT NULL '
+      "DEFAULT 'personal' "
+      "CHECK (ownership IN ('personal', 'household', 'shared'))",
+    );
+    batch.execute(
+      'ALTER TABLE ${Tables.savingsGoals} ADD COLUMN household_id TEXT '
+      "NOT NULL DEFAULT ''",
+    );
+    for (final column in [
+      'owner_uid',
+      'created_by',
+      'created_by_name',
+      'updated_by',
+    ]) {
+      batch.execute(
+        'ALTER TABLE ${Tables.savingsGoals} ADD COLUMN $column TEXT',
+      );
+    }
+    batch.execute(
+      'CREATE INDEX idx_savings_goals_scope '
+      'ON ${Tables.savingsGoals}(ownership, household_id)',
+    );
+    batch.execute(
+      'ALTER TABLE ${Tables.savingsEntries} ADD COLUMN user_uid TEXT',
+    );
+    batch.execute(
+      'ALTER TABLE ${Tables.savingsEntries} ADD COLUMN user_name TEXT',
+    );
+    batch.execute('''
+      CREATE TABLE ${Tables.savingsMembers} (
+        goal_id TEXT NOT NULL,
+        uid TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('owner', 'member')),
+        status TEXT NOT NULL DEFAULT 'active'
+          CHECK (status IN ('active', 'removed', 'left')),
+        can_contribute INTEGER NOT NULL DEFAULT 1,
+        can_withdraw INTEGER NOT NULL DEFAULT 0,
+        display_name TEXT,
+        email TEXT,
+        joined_at INTEGER,
+        PRIMARY KEY (goal_id, uid)
+      )
+    ''');
+    batch.execute('''
+      CREATE TABLE ${Tables.savingsInvitations} (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL,
+        goal_name TEXT NOT NULL,
+        invited_email TEXT,
+        invited_by TEXT NOT NULL,
+        invited_by_name TEXT,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        accepted_by TEXT,
+        accepted_by_name TEXT,
+        direction TEXT NOT NULL DEFAULT 'sent'
+          CHECK (direction IN ('sent', 'received'))
+      )
+    ''');
+    await batch.commit(noResult: true);
+  }
+
+  /// v5: savings goals and their contribution / withdrawal history. Adds
+  /// tables only; no existing row changes.
+  ///
+  /// A goal's saved amount is not stored: it is the sum of its entries, so
+  /// every device derives the same balance from the same history. There is
+  /// no foreign key from entries to goals because entries may arrive from
+  /// the cloud before their goal; entries of a missing goal are not counted.
+  static Future<void> _migrateToV5(Database db) async {
+    final batch = db.batch();
+    batch.execute('''
+      CREATE TABLE ${Tables.savingsGoals} (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        purpose TEXT NOT NULL DEFAULT 'other',
+        custom_purpose TEXT NOT NULL DEFAULT '',
+        target_minor INTEGER NOT NULL CHECK (target_minor > 0),
+        target_date INTEGER,
+        notes TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'active'
+          CHECK (status IN ('active', 'paused', 'completed')),
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        completed_at INTEGER,
+        sync_status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (sync_status IN ('pending', 'synced'))
+      )
+    ''');
+    batch.execute('''
+      CREATE TABLE ${Tables.savingsEntries} (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL,
+        type TEXT NOT NULL CHECK (type IN ('deposit', 'withdrawal')),
+        amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+        date INTEGER NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        sync_status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (sync_status IN ('pending', 'synced'))
+      )
+    ''');
+    batch.execute(
+      'CREATE INDEX idx_savings_entries_goal '
+      'ON ${Tables.savingsEntries}(goal_id, date)',
+    );
+    await batch.commit(noResult: true);
+  }
 
   /// v4: recurring transaction rules. Adds a table only; no existing row
   /// changes.

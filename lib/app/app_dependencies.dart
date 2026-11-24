@@ -1,20 +1,28 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/database/app_database.dart';
 import '../core/services/auth_service.dart';
 import '../core/services/backup_service.dart';
+import '../core/services/cloud_savings_store.dart';
 import '../core/services/cloud_history_loader.dart';
 import '../core/services/cloud_transaction_store.dart';
 import '../core/services/connectivity_monitor.dart';
 import '../core/services/data_reset_service.dart';
 import '../core/services/file_service.dart';
 import '../core/services/household_service.dart';
+import '../core/services/notification_cloud.dart';
+import '../core/services/notification_service.dart';
+import '../core/services/photo_picker.dart';
+import '../core/services/profile_photo_service.dart';
 import '../core/services/transaction_sync_service.dart';
 import '../repositories/app_settings_repository.dart';
 import '../repositories/budget_repository.dart';
 import '../repositories/category_repository.dart';
 import '../repositories/recurring_repository.dart';
+import '../repositories/savings_repository.dart';
 import '../repositories/settings_sync_repository.dart';
 import '../repositories/sync_repository.dart';
 import '../repositories/transaction_repository.dart';
@@ -37,6 +45,13 @@ class AppDependencies {
     this.householdService,
     this.dataResetService,
     this.recurringRepository,
+    this.savingsRepository,
+    this.savingsCloud,
+    this.profilePhotoService,
+    this.photoPicker,
+    this.pushMessaging,
+    this.localNotifier = const NoopLocalNotifier(),
+    this.notificationCloud,
   });
 
   /// Opens the database and wires the SQLite-backed implementations.
@@ -49,11 +64,20 @@ class AppDependencies {
       persistenceEnabled: false,
     );
     final authService = FirebaseAuthService();
+    final savings = SqliteSavingsRepository(database);
+    final savingsCloud = FirestoreSavingsStore();
+    final localNotifier = SystemLocalNotifier.isSupported
+        ? SystemLocalNotifier()
+        : null;
+    // Android channels exist before the first push arrives.
+    unawaited(localNotifier?.prepare());
     final syncService = TransactionSyncService(
       local: SqliteLocalSyncStore(database),
       cloud: FirestoreTransactionStore(),
       settings: SqliteSettingsSyncStore(database),
       records: FirestoreRecordStore(),
+      savingsLocal: savings,
+      savingsCloud: savingsCloud,
     );
     return AppDependencies(
       preferences: prefs,
@@ -69,6 +93,15 @@ class AppDependencies {
       householdService: FirebaseHouseholdService(),
       dataResetService: SyncDataResetService(syncService),
       recurringRepository: SqliteRecurringRepository(database),
+      savingsRepository: savings,
+      savingsCloud: savingsCloud,
+      profilePhotoService: FirebaseProfilePhotoService(),
+      photoPicker: ImagePickerPhotoPicker(),
+      pushMessaging: FirebasePushMessaging.isSupported
+          ? FirebasePushMessaging()
+          : null,
+      localNotifier: localNotifier ?? const NoopLocalNotifier(),
+      notificationCloud: FirestoreNotificationCloud(),
     );
   }
 
@@ -95,4 +128,27 @@ class AppDependencies {
 
   /// Recurring transaction rules; null hides the Repeat option.
   final RecurringRepository? recurringRepository;
+
+  /// Savings goals; null hides the savings feature.
+  final SavingsRepository? savingsRepository;
+
+  /// Household and shared savings in the cloud; null keeps savings
+  /// personal-only (widget tests).
+  final CloudSavingsStore? savingsCloud;
+
+  /// Profile photo storage; null hides "Change photo".
+  final ProfilePhotoService? profilePhotoService;
+
+  /// Gallery / camera picker for the profile photo; null hides
+  /// "Change photo".
+  final PhotoPicker? photoPicker;
+
+  /// Push notifications (FCM); null where unsupported (desktop, tests).
+  final PushMessaging? pushMessaging;
+
+  /// System notifications on this device.
+  final LocalNotifier localNotifier;
+
+  /// Push registrations and household budget alerts in the cloud.
+  final NotificationCloud? notificationCloud;
 }

@@ -3,9 +3,12 @@ import 'package:flutter/foundation.dart';
 import '../../models/scope_models.dart';
 import '../../models/sync_models.dart';
 import '../../models/transaction_model.dart';
+import '../../repositories/savings_repository.dart';
 import '../../repositories/settings_sync_repository.dart';
 import '../../repositories/sync_repository.dart';
 import '../constants/app_constants.dart';
+import 'cloud_savings_store.dart';
+import 'savings_sync.dart';
 import 'cloud_transaction_store.dart';
 import 'sync_conflict_resolver.dart';
 
@@ -97,6 +100,9 @@ class HistoryResult {
 ///    documents are never deleted.
 /// 4. **Budgets and categories** – upload pending changes, then merge the
 ///    whole (small) cloud collection by `updatedAt`.
+/// 5. **Savings** – personal, household and shared goals and their
+///    history (see [SavingsSyncEngine]). Savings are never removed by the
+///    retention clean-up.
 ///
 /// If the household refuses access (the user was removed), the personal
 /// sync still completes and the household is reported in
@@ -113,6 +119,8 @@ class TransactionSyncService {
     required CloudTransactionStore cloud,
     LocalSettingsSyncStore? settings,
     CloudRecordStore? records,
+    LocalSavingsSyncStore? savingsLocal,
+    CloudSavingsStore? savingsCloud,
     DateTime Function()? clock,
     this.pushBatchSize = 200,
     this.pullPageSize = 300,
@@ -120,12 +128,21 @@ class TransactionSyncService {
        _cloud = cloud,
        _settings = settings,
        _records = records,
+       _savings = savingsLocal == null || savingsCloud == null
+           ? null
+           : SavingsSyncEngine(
+               local: savingsLocal,
+               cloud: savingsCloud,
+               settings: local,
+               pageSize: pullPageSize,
+             ),
        _clock = clock ?? DateTime.now;
 
   final LocalSyncStore _local;
   final CloudTransactionStore _cloud;
   final LocalSettingsSyncStore? _settings;
   final CloudRecordStore? _records;
+  final SavingsSyncEngine? _savings;
   final DateTime Function() _clock;
   final int pushBatchSize;
   final int pullPageSize;
@@ -239,6 +256,12 @@ class TransactionSyncService {
         onPage: restore ? () => progress(RestoreStep.personal) : null,
       );
       await _syncSettings(personal, report, download: download);
+      await _savings?.syncPersonal(
+        uid,
+        report,
+        download: download,
+        restore: restore,
+      );
 
       if (householdId != null) {
         final shared = CloudPartition.household(uid, householdId);
@@ -255,6 +278,13 @@ class TransactionSyncService {
             onPage: restore ? () => progress(RestoreStep.household) : null,
           );
           await _syncSettings(shared, report, download: download);
+          await _savings?.syncHousehold(
+            uid,
+            householdId,
+            report,
+            download: download,
+            restore: restore,
+          );
         } on CloudAccessDeniedException {
           // No longer an active member: nothing is uploaded or deleted; the
           // household provider confirms the membership and releases the
@@ -262,6 +292,14 @@ class TransactionSyncService {
           report.householdsDenied.add(householdId);
         }
       }
+
+      // Independent shared goals do not depend on the household.
+      await _savings?.syncShared(
+        uid,
+        report,
+        download: download,
+        restore: restore,
+      );
 
       if (restore) {
         if (report.failed > 0) {

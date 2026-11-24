@@ -144,13 +144,43 @@ function checkInvitationUsable(invitation, auth, nowMs) {
   }
 }
 
+const MAX_PHOTO_URL_LENGTH = 2048;
+
+/**
+ * A profile photo URL other members' apps may load: https only, bounded
+ * length. Anything else is dropped (avatars fall back to initials).
+ */
+function safePhotoUrl(value) {
+  if (typeof value !== 'string' || value.length > MAX_PHOTO_URL_LENGTH) {
+    return null;
+  }
+  try {
+    return new URL(value).protocol === 'https:' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Public profile fields stored on a member document. */
 function memberProfile(auth) {
   const token = auth.token ?? {};
   return {
     displayName: typeof token.name === 'string' ? token.name : null,
     email: typeof token.email === 'string' ? token.email : null,
-    photoUrl: typeof token.picture === 'string' ? token.picture : null,
+    photoUrl: safePhotoUrl(token.picture),
+  };
+}
+
+/**
+ * The same fields from a Firebase Auth user record, which reflects profile
+ * changes immediately (ID token claims only change on the next refresh).
+ */
+function accountProfile(record) {
+  return {
+    displayName:
+      typeof record?.displayName === 'string' ? record.displayName : null,
+    email: typeof record?.email === 'string' ? record.email : null,
+    photoUrl: safePhotoUrl(record?.photoURL),
   };
 }
 
@@ -174,6 +204,8 @@ module.exports = {
   inviteDays,
   invitationState,
   checkInvitationUsable,
+  safePhotoUrl,
   memberProfile,
+  accountProfile,
   displayName,
 };

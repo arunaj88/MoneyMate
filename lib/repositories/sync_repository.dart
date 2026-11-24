@@ -737,6 +737,18 @@ class SqliteLocalSyncStore implements LocalSyncStore {
         where: 'household_id = ?',
         whereArgs: [householdId],
       );
+      // The household's savings goals and their history (cached copies).
+      await txn.rawDelete(
+        'DELETE FROM ${Tables.savingsEntries} WHERE goal_id IN (SELECT id '
+        "FROM ${Tables.savingsGoals} WHERE ownership = 'household' "
+        'AND household_id = ?)',
+        [householdId],
+      );
+      await txn.delete(
+        Tables.savingsGoals,
+        where: "ownership = 'household' AND household_id = ?",
+        whereArgs: [householdId],
+      );
       for (final key in [
         SyncKeys.cursorMicros(scope),
         SyncKeys.cursorDocId(scope),
@@ -749,8 +761,8 @@ class SqliteLocalSyncStore implements LocalSyncStore {
       }
       await txn.delete(
         Tables.appSettings,
-        where: 'key LIKE ?',
-        whereArgs: ['alert.h.$householdId.%'],
+        where: 'key LIKE ? OR key LIKE ?',
+        whereArgs: ['alert.h.$householdId.%', 'sync.household:$householdId.%'],
       );
       return HouseholdReleaseResult(kept: kept, removed: removed);
     });
@@ -792,6 +804,18 @@ class SqliteLocalSyncStore implements LocalSyncStore {
         await txn.delete(
           Tables.transactions,
           where: "scope = 'shared' AND household_id = ?",
+          whereArgs: [householdId],
+        );
+        // The household's savings goals and their history (cached copies).
+        await txn.rawDelete(
+          'DELETE FROM ${Tables.savingsEntries} WHERE goal_id IN (SELECT id '
+          "FROM ${Tables.savingsGoals} WHERE ownership = 'household' "
+          'AND household_id = ?)',
+          [householdId],
+        );
+        await txn.delete(
+          Tables.savingsGoals,
+          where: "ownership = 'household' AND household_id = ?",
           whereArgs: [householdId],
         );
         final scope = DataScope.household(householdId);
@@ -837,6 +861,19 @@ class SqliteLocalSyncStore implements LocalSyncStore {
         where: "household_id = ''${older('created_at')}",
         whereArgs: args(),
       );
+      // Personal savings only; household and shared goals belong to others
+      // too and are not part of a personal reset.
+      await txn.rawDelete(
+        'DELETE FROM ${Tables.savingsEntries} WHERE goal_id IN (SELECT id '
+        "FROM ${Tables.savingsGoals} WHERE ownership = 'personal')"
+        '${older('updated_at')}',
+        args(),
+      );
+      await txn.delete(
+        Tables.savingsGoals,
+        where: "ownership = 'personal'${older('updated_at')}",
+        whereArgs: args(),
+      );
       // Custom personal categories, unless remaining (shared) records use
       // them.
       await txn.rawDelete(
@@ -864,11 +901,16 @@ class SqliteLocalSyncStore implements LocalSyncStore {
       // Personal sync position, status and budget alert state.
       await txn.delete(
         Tables.appSettings,
-        where: 'key IN (?, ?, ?) OR (key LIKE ? AND key NOT LIKE ?)',
+        where:
+            'key IN (?, ?, ?, ?, ?, ?, ?) OR (key LIKE ? AND key NOT LIKE ?)',
         whereArgs: [
           SyncKeys.pullCursorMicros,
           SyncKeys.pullCursorDocId,
           SyncKeys.lastSyncedAt,
+          SyncKeys.savingsGoalsCursorMicros,
+          SyncKeys.savingsGoalsCursorDocId,
+          SyncKeys.savingsEntriesCursorMicros,
+          SyncKeys.savingsEntriesCursorDocId,
           'alert.%',
           'alert.h.%',
         ],
@@ -892,6 +934,10 @@ class SqliteLocalSyncStore implements LocalSyncStore {
         Tables.budgets,
         Tables.transactions,
         Tables.recurringRules,
+        Tables.savingsGoals,
+        Tables.savingsEntries,
+        Tables.savingsMembers,
+        Tables.savingsInvitations,
       ]) {
         await txn.delete(table);
       }

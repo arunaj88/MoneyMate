@@ -12,6 +12,8 @@ import '../../../providers/category_provider.dart';
 import '../../../providers/dashboard_provider.dart';
 import '../../../providers/household_provider.dart';
 import '../../../providers/reset_provider.dart';
+import '../../../models/savings_model.dart';
+import '../../../providers/savings_provider.dart';
 import '../../../providers/settings_provider.dart';
 import '../../../providers/sync_provider.dart';
 import '../../../shared/widgets/app_card.dart';
@@ -21,6 +23,8 @@ import '../../../shared/widgets/stat_widgets.dart';
 import '../../../shared/widgets/transaction_tile.dart';
 import '../../../shared/widgets/user_avatar.dart';
 import '../../household/widgets/household_widgets.dart';
+import '../../savings/savings_actions.dart';
+import '../../savings/widgets/savings_widgets.dart';
 import '../../settings/reset_app.dart';
 import '../../transactions/transaction_actions.dart';
 import '../widgets/balance_card.dart';
@@ -203,12 +207,32 @@ class _DashboardContent extends StatelessWidget {
     );
 
     final shared = !data.scope.includePersonal;
+    final savingsAvailable = context.select<SavingsProvider, bool>(
+      (s) => s.isAvailable,
+    );
+    // Personal goals belong to the personal view, the household's goals to
+    // the household view; each reduces only its own balance.
+    final ownership = shared
+        ? SavingsOwnership.household
+        : SavingsOwnership.personal;
+    final hasGoals = context.select<SavingsProvider, bool>(
+      (s) => s.summaryOf(ownership).goalCount > 0,
+    );
+    final showSavings = savingsAvailable;
     final sections = <Widget>[
       if (context.watch<ResetProvider>().restorePending)
         const RestorePendingBanner(),
       BalanceCard(
-        title: shared ? 'Household balance' : 'Total balance',
-        balanceMinor: data.balanceMinor,
+        title: switch ((shared, showSavings && hasGoals)) {
+          (true, true) => 'Household available balance',
+          (true, false) => 'Household balance',
+          (false, true) => 'Available balance',
+          (false, false) => 'Total balance',
+        },
+        // Money in savings goals is not available to spend.
+        balanceMinor: showSavings ? data.availableMinor : data.balanceMinor,
+        savedMinor: showSavings && hasGoals ? data.savedMinor : null,
+        onSavingsTap: () => openSavingsScreen(context, ownership: ownership),
         monthIncomeMinor: data.month.incomeMinor,
         monthExpenseMinor: data.month.expenseMinor,
         formatter: formatter,
@@ -277,6 +301,8 @@ class _DashboardContent extends StatelessWidget {
         formatter: formatter,
         onOpenBudget: () => onNavigate(2),
       ),
+      if (showSavings)
+        SavingsOverviewCard(formatter: formatter, ownership: ownership),
       AppCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

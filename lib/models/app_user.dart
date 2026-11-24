@@ -53,6 +53,14 @@ class AppUser {
     );
   }
 
+  /// This profile with [photoUrl] replaced (null or empty removes it).
+  AppUser withPhotoUrl(String? photoUrl) => AppUser(
+    uid: uid,
+    email: email,
+    displayName: displayName,
+    photoUrl: photoUrl == null || photoUrl.trim().isEmpty ? null : photoUrl,
+  );
+
   Map<String, Object?> toMap() => {
     'uid': uid,
     'email': email,

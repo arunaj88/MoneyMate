@@ -3,17 +3,39 @@ rules_version = '2';
 // MoneyMate security rules.
 //
 // Personal data:  users/{uid}/transactions | personalBudgets | personalCategories
+//                 | savingsGoals | savingsEntries | sharedGoalMemberships
 //                 Only the signed-in owner can read or write it.
 // Shared data:    households/{householdId}/transactions | budgets | categories | settings
 //                 Only verified active members (checked against
 //                 households/{householdId}/members/{uid}) can read or write it.
+//                 households/{householdId}/savingsGoals | savingsEntries
+//                 (household savings: same membership check).
+// Shared goals:   sharedGoals/{goalId} with members / entries subcollections
+//                 and sharedGoalInvitations/{code}: independent of
+//                 households. Only active members (sharedGoals/{goalId}/
+//                 members/{uid}) can read; only the owner manages the goal,
+//                 its members and invitations. Joining requires a pending,
+//                 unexpired invitation (bound to the invitee's email, or a
+//                 one-time code) accepted in the same batch.
+// Savings totals: household and shared goals keep a running total
+//                 (savedMinor) that may only change together with a new
+//                 entry of exactly that amount, in one transaction, and
+//                 never below zero. Entries are attributed to the caller and
+//                 are immutable.
+// Devices:        users/{uid}/devices/{deviceId}: one document per app
+//                 installation with its push (FCM) token and notification
+//                 preferences. Owner only; deleted on sign-out.
+// Budget alerts:  households/{householdId}/budgetAlerts/{alertId}: written once
+//                 by the member whose app first sees a shared budget cross
+//                 a threshold; a Cloud Function pushes it to the others.
 // Membership:     households, members, invitations, users/{uid}/memberships and
 //                 invitationCodes are written only by Cloud Functions (admin),
 //                 so nobody can add themselves to a household, change a role or
 //                 accept an invitation from the client.
 //
 // Records are never hard-deleted by clients (deletions are soft, with
-// `deleted: true`), so client deletes are rejected everywhere.
+// `deleted: true`), so client deletes are rejected everywhere except for
+// device registrations, which are not records.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -104,6 +126,137 @@ service cloud.firestore {
             && d.type in ['income', 'expense']));
     }
 
+    // Savings goal details (all three kinds).
+    function validSavingsGoal(goalId) {
+      let d = incoming();
+      return validRecord(goalId)
+        && (d.deleted == true
+          || (d.name is string
+            && d.name.size() > 0
+            && d.name.size() <= 60
+            && d.purpose is string
+            && d.purpose.size() <= 32
+            && optionalString(d, 'customPurpose', 40)
+            && optionalString(d, 'notes', 300)
+            && d.targetMinor is int
+            && d.targetMinor > 0
+            && d.targetMinor <= 100000000000000
+            && d.status in ['active', 'paused', 'completed']
+            && d.createdAt is int
+            && (!('targetDate' in d) || d.targetDate == null || d.targetDate is int)));
+    }
+
+    // Contributions to and withdrawals from a goal.
+    function validSavingsEntry(entryId) {
+      let d = incoming();
+      return validRecord(entryId)
+        && (d.deleted == true
+          || (d.goalId is string
+            && d.goalId.size() > 0
+            && d.goalId.size() <= 128
+            && d.type in ['deposit', 'withdrawal']
+            && d.amountMinor is int
+            && d.amountMinor > 0
+            && d.amountMinor <= 100000000000000
+            && d.date is int
+            && d.createdAt is int
+            && optionalString(d, 'note', 200)
+            && optionalString(d, 'userName', 80)));
+    }
+
+    // ------------------------------------------- household / shared savings
+
+    function signedAmount(e) {
+      return e.type == 'deposit' ? e.amountMinor : -e.amountMinor;
+    }
+
+    // The goal's details change; its running total does not.
+    function totalUnchanged() {
+      return incoming().get('savedMinor', 0) == resource.data.get('savedMinor', 0)
+        && incoming().get('lastEntryId', '') == resource.data.get('lastEntryId', '');
+    }
+
+    // Only the running total changes, by exactly the amount of an entry
+    // created in the same transaction, and it never goes below zero.
+    function totalMovedBy(entryPath, goalId) {
+      return incoming().diff(resource.data).affectedKeys().hasOnly(['savedMinor', 'lastEntryId'])
+        && !exists(entryPath)
+        && existsAfter(entryPath)
+        && getAfter(entryPath).data.goalId == goalId
+        && incoming().savedMinor == resource.data.get('savedMinor', 0) + signedAmount(getAfter(entryPath).data)
+        && incoming().savedMinor >= 0;
+    }
+
+    // A new entry of a household or shared goal: attributed to the caller,
+    // for a live goal, and written together with the goal's new total.
+    function collaborativeEntry(entryId, goalPath) {
+      let d = incoming();
+      let goal = get(goalPath).data;
+      let after = getAfter(goalPath).data;
+      return validSavingsEntry(entryId)
+        && d.deleted == false
+        && d.userUid == request.auth.uid
+        && goal.get('deleted', false) == false
+        && after.get('lastEntryId', '') == entryId
+        && after.get('savedMinor', 0) == goal.get('savedMinor', 0) + signedAmount(d)
+        && (d.type == 'withdrawal' || goal.status == 'active');
+    }
+
+    // ---------------------------------------------------- shared goals
+
+    function sharedGoalPath(goalId) {
+      return /databases/$(database)/documents/sharedGoals/$(goalId);
+    }
+
+    function sharedMemberPath(goalId, uid) {
+      return /databases/$(database)/documents/sharedGoals/$(goalId)/members/$(uid);
+    }
+
+    function invitationPath(code) {
+      return /databases/$(database)/documents/sharedGoalInvitations/$(code);
+    }
+
+    function isSharedMember(goalId) {
+      return signedIn()
+        && exists(sharedMemberPath(goalId, request.auth.uid))
+        && get(sharedMemberPath(goalId, request.auth.uid)).data.status == 'active';
+    }
+
+    function sharedRole(goalId) {
+      return get(sharedMemberPath(goalId, request.auth.uid)).data;
+    }
+
+    function isSharedOwner(goalId) {
+      return isSharedMember(goalId) && sharedRole(goalId).role == 'owner';
+    }
+
+    function myEmail() {
+      return request.auth.token.get('email', '').lower();
+    }
+
+    // A member document written by someone joining with an invitation that
+    // is accepted in the same batch.
+    function joinsWithInvitation(goalId, memberUid) {
+      let d = incoming();
+      let before = get(invitationPath(d.invitationId)).data;
+      let after = getAfter(invitationPath(d.invitationId)).data;
+      return d.uid == memberUid
+        && d.role == 'member'
+        && d.status == 'active'
+        && d.canContribute == true
+        && d.canWithdraw == false
+        && before.goalId == goalId
+        && before.status == 'pending'
+        && after.status == 'accepted'
+        && after.acceptedBy == memberUid
+        && get(sharedGoalPath(goalId)).data.get('deleted', false) == false;
+    }
+
+    function statusOnlyChange() {
+      return incoming().diff(resource.data).affectedKeys()
+        .hasOnly(['status', 'updatedAt', 'serverUpdatedAt']);
+    }
+
     // ------------------------------------------------------ personal data
 
     match /users/{uid} {
@@ -142,6 +295,51 @@ service cloud.firestore {
         allow read: if isUser(uid);
         allow create, update: if isUser(uid) && validCategory(categoryId);
         allow delete: if false;
+      }
+
+      match /savingsGoals/{goalId} {
+        allow read: if isUser(uid);
+        allow create, update: if isUser(uid)
+          && validSavingsGoal(goalId)
+          && incoming().get('ownership', 'personal') == 'personal';
+        allow delete: if false;
+      }
+
+      match /savingsEntries/{entryId} {
+        allow read: if isUser(uid);
+        allow create, update: if isUser(uid)
+          && validSavingsEntry(entryId)
+          && incoming().get('userUid', uid) == uid;
+        allow delete: if false;
+      }
+
+      // The user's own list of shared goals they joined (a hint for sync;
+      // access itself is decided by the goal's member documents).
+      match /sharedGoalMemberships/{goalId} {
+        allow read, delete: if isUser(uid);
+        allow create, update: if isUser(uid) && incoming().goalId == goalId;
+      }
+
+      // Push notification registration of one app installation.
+      match /devices/{deviceId} {
+        allow read, delete: if isUser(uid);
+        allow create, update: if isUser(uid)
+          && deviceId.size() <= 64
+          && incoming().keys().hasOnly(['deviceId', 'token', 'platform',
+            'currencyCode', 'householdActivity', 'householdBudgets',
+            'savingsUpdates', 'updatedAt', 'serverUpdatedAt'])
+          && incoming().deviceId == deviceId
+          && incoming().token is string
+          && incoming().token.size() > 0
+          && incoming().token.size() <= 4096
+          && incoming().platform in ['android', 'ios', 'web', 'macos', 'windows', 'linux']
+          && incoming().currencyCode is string
+          && incoming().currencyCode.size() == 3
+          && incoming().householdActivity is bool
+          && incoming().householdBudgets is bool
+          && incoming().savingsUpdates is bool
+          && incoming().updatedAt is int
+          && incoming().serverUpdatedAt == request.time;
       }
 
       // Written by Cloud Functions only.
@@ -207,6 +405,64 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Household savings: any active member may create and edit goals and
+      // contribute or withdraw, as with shared transactions.
+      match /savingsGoals/{goalId} {
+        allow read: if isActiveMember(householdId);
+        allow create: if isActiveMember(householdId)
+          && validSavingsGoal(goalId)
+          && incoming().deleted == false
+          && incoming().ownership == 'household'
+          && incoming().householdId == householdId
+          && incoming().updatedBy == request.auth.uid
+          && incoming().get('savedMinor', 0) == 0
+          && !('lastEntryId' in incoming());
+        allow update: if isActiveMember(householdId) && (
+          (validSavingsGoal(goalId)
+            && totalUnchanged()
+            && incoming().updatedBy == request.auth.uid
+            && incoming().get('householdId', householdId) == householdId
+            && incoming().get('createdAt', 0) == resource.data.get('createdAt', 0))
+          || totalMovedBy(
+            /databases/$(database)/documents/households/$(householdId)/savingsEntries/$(incoming().get('lastEntryId', '-')),
+            goalId));
+        allow delete: if false;
+      }
+
+      match /savingsEntries/{entryId} {
+        allow read: if isActiveMember(householdId);
+        allow create: if isActiveMember(householdId)
+          && collaborativeEntry(entryId,
+            /databases/$(database)/documents/households/$(householdId)/savingsGoals/$(incoming().goalId));
+        allow update, delete: if false;
+      }
+
+      // A shared budget crossed 80%, 90% or 100%. The ID names the budget,
+      // period and level, so each alert is written once (later writers
+      // are rejected: updates are not allowed).
+      match /budgetAlerts/{alertId} {
+        allow read: if isActiveMember(householdId);
+        allow create: if isActiveMember(householdId)
+          && alertId.matches('[A-Za-z0-9._-]{1,200}')
+          && incoming().keys().hasOnly(['id', 'key', 'level', 'title',
+            'message', 'createdBy', 'createdByName', 'createdAt',
+            'periodEnd', 'serverCreatedAt'])
+          && incoming().id == alertId
+          && incoming().key is string
+          && incoming().key.size() <= 200
+          && incoming().level in ['approaching', 'warning', 'exceeded']
+          && incoming().title is string
+          && incoming().title.size() <= 40
+          && incoming().message is string
+          && incoming().message.size() <= 300
+          && incoming().createdBy == request.auth.uid
+          && optionalString(incoming(), 'createdByName', 80)
+          && incoming().createdAt is int
+          && incoming().periodEnd is int
+          && incoming().serverCreatedAt == request.time;
+        allow update, delete: if false;
+      }
+
       match /settings/{documentId} {
         allow read: if isActiveMember(householdId);
         allow create, update: if isOwner(householdId)
@@ -214,6 +470,135 @@ service cloud.firestore {
           && incoming().serverUpdatedAt == request.time;
         allow delete: if false;
       }
+    }
+
+    // ------------------------------------------ independent shared goals
+
+    match /sharedGoals/{goalId} {
+      allow read: if isSharedMember(goalId);
+      // The creator becomes the owner, in the same batch.
+      allow create: if signedIn()
+        && validSavingsGoal(goalId)
+        && incoming().deleted == false
+        && incoming().ownership == 'shared'
+        && incoming().ownerUid == request.auth.uid
+        && incoming().createdBy == request.auth.uid
+        && incoming().get('savedMinor', 0) == 0
+        && !('lastEntryId' in incoming())
+        && getAfter(sharedMemberPath(goalId, request.auth.uid)).data.role == 'owner';
+      allow update: if
+        // The owner edits details, pauses, completes or (soft) deletes.
+        (isSharedOwner(goalId)
+          && validSavingsGoal(goalId)
+          && totalUnchanged()
+          && incoming().ownerUid == resource.data.ownerUid
+          && incoming().get('createdAt', 0) == resource.data.get('createdAt', 0)
+          && incoming().get('updatedBy', '') == request.auth.uid)
+        // Any member records an entry (its permissions are checked there).
+        || (isSharedMember(goalId)
+          && totalMovedBy(
+            /databases/$(database)/documents/sharedGoals/$(goalId)/entries/$(incoming().get('lastEntryId', '-')),
+            goalId));
+      allow delete: if false;
+
+      match /entries/{entryId} {
+        allow read: if isSharedMember(goalId);
+        allow create: if isSharedMember(goalId)
+          && collaborativeEntry(entryId, sharedGoalPath(goalId))
+          && (incoming().type == 'deposit'
+            ? (sharedRole(goalId).role == 'owner'
+              || sharedRole(goalId).get('canContribute', true) == true)
+            : (sharedRole(goalId).role == 'owner'
+              || sharedRole(goalId).get('canWithdraw', false) == true));
+        allow update, delete: if false;
+      }
+
+      match /members/{memberUid} {
+        allow read: if isSharedMember(goalId);
+        allow create: if signedIn() && memberUid == request.auth.uid && (
+          // The creator, in the goal-creating batch.
+          (!exists(sharedGoalPath(goalId))
+            && getAfter(sharedGoalPath(goalId)).data.ownerUid == memberUid
+            && incoming().uid == memberUid
+            && incoming().role == 'owner'
+            && incoming().status == 'active')
+          // Anyone else, by accepting an invitation.
+          || joinsWithInvitation(goalId, memberUid));
+        allow update: if signedIn() && (
+          // Rejoining with a new invitation after leaving or removal.
+          (memberUid == request.auth.uid
+            && resource.data.status != 'active'
+            && joinsWithInvitation(goalId, memberUid))
+          // The owner removes a member or changes their permissions; a
+          // removed member cannot be brought back without an invitation.
+          || (isSharedOwner(goalId)
+            && memberUid != request.auth.uid
+            && resource.data.role == 'member'
+            && incoming().diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'canContribute', 'canWithdraw', 'serverUpdatedAt'])
+            && (incoming().status == resource.data.status
+              || (resource.data.status == 'active' && incoming().status == 'removed'))
+            && incoming().canContribute is bool
+            && incoming().canWithdraw is bool)
+          // A member leaves.
+          || (memberUid == request.auth.uid
+            && resource.data.role == 'member'
+            && resource.data.status == 'active'
+            && incoming().diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'canContribute', 'canWithdraw', 'serverUpdatedAt'])
+            && incoming().canContribute == resource.data.canContribute
+            && incoming().canWithdraw == resource.data.canWithdraw
+            && incoming().status == 'left'));
+        allow delete: if false;
+      }
+    }
+
+    // Invitations to shared goals. The document ID is the long, random
+    // invitation code: knowing it is what lets someone open it. Lists are
+    // limited to the sender's own invitations and those addressed to the
+    // caller's email.
+    match /sharedGoalInvitations/{code} {
+      allow get: if signedIn();
+      allow list: if signedIn()
+        && (resource.data.invitedBy == request.auth.uid
+          || resource.data.invitedEmail == myEmail());
+      allow create: if signedIn()
+        && code.size() == 16
+        && incoming().id == code
+        && incoming().invitedBy == request.auth.uid
+        && isSharedOwner(incoming().goalId)
+        && incoming().status == 'pending'
+        && incoming().goalName is string
+        && incoming().goalName.size() <= 60
+        && (incoming().invitedEmail == null
+          || (incoming().invitedEmail is string
+            && incoming().invitedEmail.size() <= 254
+            && incoming().invitedEmail == incoming().invitedEmail.lower()))
+        && optionalString(incoming(), 'invitedByName', 80)
+        && incoming().createdAt is int
+        && incoming().expiresAt is int
+        && incoming().expiresAt <= request.time.toMillis() + 2678400000
+        && incoming().serverUpdatedAt == request.time;
+      allow update: if signedIn() && resource.data.status == 'pending' && (
+        // Accept, adding the caller as a member in the same batch.
+        (incoming().diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'acceptedBy', 'acceptedByName', 'updatedAt', 'serverUpdatedAt'])
+          && incoming().status == 'accepted'
+          && incoming().acceptedBy == request.auth.uid
+          && request.time.toMillis() < resource.data.expiresAt
+          && (resource.data.invitedEmail == null
+            || resource.data.invitedEmail == myEmail())
+          && getAfter(sharedMemberPath(resource.data.goalId, request.auth.uid)).data.invitationId == code)
+        // Reject (the addressee).
+        || (statusOnlyChange()
+          && incoming().status == 'rejected'
+          && resource.data.invitedEmail != null
+          && resource.data.invitedEmail == myEmail())
+        // Revoke (the sender).
+        || (statusOnlyChange()
+          && incoming().status == 'revoked'
+          && resource.data.invitedBy == request.auth.uid));
+      allow delete: if false;
     }
 
     // Invitation code lookup: Cloud Functions only, never readable.

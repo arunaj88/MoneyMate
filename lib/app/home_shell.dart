@@ -12,6 +12,7 @@ import '../features/transactions/transaction_actions.dart';
 import '../models/budget_model.dart';
 import '../providers/budget_provider.dart';
 import '../providers/dashboard_provider.dart';
+import '../providers/notification_provider.dart';
 import '../providers/recurring_provider.dart';
 import '../providers/report_provider.dart';
 import '../shared/widgets/budget_progress_bar.dart';
@@ -76,6 +77,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
     context.read<RecurringProvider>().runDue();
+    // Notifications may have been allowed in the system settings meanwhile.
+    context.read<NotificationProvider>().refreshPermission();
     final today = PeriodUtils.dateOnly(DateTime.now());
     if (today == _lastActiveDay) return;
     _lastActiveDay = today;

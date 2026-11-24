@@ -10,7 +10,8 @@
  *   db    – admin Firestore instance
  *   auth  – the callable request's auth ({uid, token})
  *   data  – the request payload
- *   deps  – {now(): number, randomBytes(n): Uint8Array}
+ *   deps  – {now(): number, randomBytes(n): Uint8Array,
+ *            getUser(uid): Promise<UserRecord>}
  */
 
 const { FieldValue, Timestamp } = require('firebase-admin/firestore');
@@ -463,6 +464,27 @@ async function leaveHousehold(db, auth, data, deps) {
   return { ok: true };
 }
 
+/**
+ * Copies the caller's current account name, email and photo to their own
+ * member document, so other members see a changed profile photo. The
+ * account is read with admin rights (falling back to the ID token), so a
+ * client cannot write arbitrary profile data for itself or anyone else.
+ */
+async function refreshMemberProfile(db, auth, data, deps) {
+  const uid = requireAuth(auth);
+  const hid = requireString(data?.householdId, 'household');
+  const now = Timestamp.fromMillis(deps.now());
+  const profile = deps.getUser
+    ? logic.accountProfile(await deps.getUser(uid))
+    : logic.memberProfile(auth);
+
+  await db.runTransaction(async (tx) => {
+    const { member } = await requireMember(tx, db, hid, uid);
+    tx.update(member.ref, { ...profile, updatedAt: now });
+  });
+  return { ok: true };
+}
+
 async function transferOwnership(db, auth, data, deps) {
   const uid = requireAuth(auth);
   const hid = requireString(data?.householdId, 'household');
@@ -543,6 +565,7 @@ module.exports = {
   acceptInvitation,
   removeMember,
   leaveHousehold,
+  refreshMemberProfile,
   transferOwnership,
   deleteHousehold,
 };

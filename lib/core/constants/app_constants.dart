@@ -9,7 +9,7 @@ class AppConstants {
   static const String appTagline = 'Offline-first personal expense tracker';
 
   static const String databaseName = 'money_mate.db';
-  static const int databaseVersion = 4;
+  static const int databaseVersion = 6;
 
   /// Version of the JSON backup format. Bump when the structure changes.
   static const int backupSchemaVersion = 1;
@@ -48,6 +48,23 @@ class PrefKeys {
   static const String firstDayOfWeek = 'settings.firstDayOfWeek';
   static const String budgetAlertsEnabled = 'settings.budgetAlertsEnabled';
   static const String categoryAlertsEnabled = 'settings.categoryAlertsEnabled';
+  static const String recurringNotifications = 'settings.notify.recurring';
+  static const String householdActivityNotifications =
+      'settings.notify.householdActivity';
+  static const String householdBudgetNotifications =
+      'settings.notify.householdBudgets';
+  static const String savingsNotifications = 'settings.notify.savings';
+
+  /// Random ID of this app installation for its push registration.
+  static const String notificationDeviceId = 'notifications.deviceId';
+
+  /// The account this installation last registered for pushes, so a
+  /// registration left behind by an interrupted sign-out is removed.
+  static const String notificationRegisteredUid = 'notifications.uid';
+
+  /// Set once the system notification prompt has been shown.
+  static const String notificationPermissionAsked =
+      'notifications.permissionAsked';
 
   /// JSON profile of the signed-in user (UID, name, email, photo URL).
   static const String userProfile = 'auth.userProfile';
@@ -91,6 +108,29 @@ class SyncKeys {
   /// fresh until the user chooses Restore My Cloud Data. Removed only after
   /// a restore succeeded.
   static const String restorePending = 'sync.restore_pending';
+
+  /// Pull positions of the personal savings collections. The names match
+  /// `sync.%.pull_cursor_%`, so Reset App forgets them with the others.
+  static const String savingsGoalsCursorMicros =
+      'sync.savings_goals.pull_cursor_micros';
+  static const String savingsGoalsCursorDocId =
+      'sync.savings_goals.pull_cursor_doc_id';
+  static const String savingsEntriesCursorMicros =
+      'sync.savings_entries.pull_cursor_micros';
+  static const String savingsEntriesCursorDocId =
+      'sync.savings_entries.pull_cursor_doc_id';
+
+  /// Pull position of a household's savings [collection] ('savings_goals'
+  /// / 'savings_entries'), or of one shared goal's entries; [part] is
+  /// 'micros' or 'doc_id'. Matches `sync.%.pull_cursor_%`.
+  static String householdSavingsCursor(
+    String householdId,
+    String collection,
+    String part,
+  ) => 'sync.household:$householdId.$collection.pull_cursor_$part';
+
+  static String sharedGoalCursor(String goalId, String part) =>
+      'sync.shared_goal:$goalId.entries.pull_cursor_$part';
 
   /// Pull cursor keys for [scope]. Personal data keeps the original keys
   /// so existing installs do not download everything again.

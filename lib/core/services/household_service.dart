@@ -75,6 +75,10 @@ abstract class HouseholdService {
 
   /// Deletes the household and its shared data (owner, no other members).
   Future<void> deleteHousehold(String householdId);
+
+  /// Copies the caller's current account name, email and photo to their
+  /// member document, so other members see profile changes.
+  Future<void> refreshMemberProfile(String householdId);
 }
 
 /// [HouseholdService] backed by Firestore and callable Cloud Functions.
@@ -265,6 +269,10 @@ class FirebaseHouseholdService implements HouseholdService {
   @override
   Future<void> deleteHousehold(String householdId) =>
       _call('deleteHousehold', {'householdId': householdId});
+
+  @override
+  Future<void> refreshMemberProfile(String householdId) =>
+      _call('refreshMemberProfile', {'householdId': householdId});
 
   /// Turns Functions / Firestore errors into [HouseholdException]s. The
   /// functions return user-facing messages for expected failures.
