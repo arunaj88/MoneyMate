@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/date_range.dart';
-import '../../../core/utils/money.dart';
-import '../../../models/savings_model.dart';
-import '../../../providers/dashboard_provider.dart';
-import '../../../providers/savings_provider.dart';
-import '../../../providers/settings_provider.dart';
-import '../../../shared/widgets/dialogs.dart';
-import 'savings_widgets.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/core/utils/date_range.dart';
+import 'package:money_mate/core/utils/money.dart';
+import 'package:money_mate/models/savings_model.dart';
+import 'package:money_mate/providers/dashboard_provider.dart';
+import 'package:money_mate/providers/savings_provider.dart';
+import 'package:money_mate/providers/settings_provider.dart';
+import 'package:money_mate/shared/widgets/dialogs.dart';
+import 'package:money_mate/features/savings/widgets/savings_widgets.dart';
 
 /// Bottom sheet that moves money into a goal (Add money) or back out of it
 /// (Withdraw money).

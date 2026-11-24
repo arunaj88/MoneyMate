@@ -1,9 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
-import '../models/category_model.dart';
-import '../models/transaction_model.dart';
-import '../repositories/category_repository.dart';
+import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/models/transaction_model.dart';
+import 'package:money_mate/repositories/category_repository.dart';
 
 /// Loads and manages income and expense categories.
 class CategoryProvider extends ChangeNotifier {

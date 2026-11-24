@@ -1,4 +1,4 @@
-import '../core/utils/date_range.dart';
+import 'package:money_mate/core/utils/date_range.dart';
 
 /// Length of a budget period.
 enum BudgetPeriod {

@@ -1,16 +1,16 @@
 import 'package:flutter/foundation.dart';
 
-import '../../models/scope_models.dart';
-import '../../models/sync_models.dart';
-import '../../models/transaction_model.dart';
-import '../../repositories/savings_repository.dart';
-import '../../repositories/settings_sync_repository.dart';
-import '../../repositories/sync_repository.dart';
-import '../constants/app_constants.dart';
-import 'cloud_savings_store.dart';
-import 'savings_sync.dart';
-import 'cloud_transaction_store.dart';
-import 'sync_conflict_resolver.dart';
+import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/models/sync_models.dart';
+import 'package:money_mate/models/transaction_model.dart';
+import 'package:money_mate/repositories/savings_repository.dart';
+import 'package:money_mate/repositories/settings_sync_repository.dart';
+import 'package:money_mate/repositories/sync_repository.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/services/cloud_savings_store.dart';
+import 'package:money_mate/core/services/savings_sync.dart';
+import 'package:money_mate/core/services/cloud_transaction_store.dart';
+import 'package:money_mate/core/services/sync_conflict_resolver.dart';
 
 /// How many days of transactions stay in the on-device database.
 class RetentionPolicy {

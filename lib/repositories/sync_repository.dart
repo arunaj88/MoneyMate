@@ -1,12 +1,12 @@
 import 'package:sqflite/sqflite.dart';
 
-import '../core/constants/app_constants.dart';
-import '../core/database/app_database.dart';
-import '../core/services/sync_conflict_resolver.dart';
-import '../models/category_model.dart';
-import '../models/scope_models.dart';
-import '../models/sync_models.dart';
-import '../models/transaction_model.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/database/app_database.dart';
+import 'package:money_mate/core/services/sync_conflict_resolver.dart';
+import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/models/sync_models.dart';
+import 'package:money_mate/models/transaction_model.dart';
 
 /// A local transaction together with its cloud sync state.
 class LocalSyncRecord {

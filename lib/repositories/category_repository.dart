@@ -1,8 +1,8 @@
 import 'package:sqflite/sqflite.dart';
 
-import '../core/database/app_database.dart';
-import '../models/category_model.dart';
-import '../models/transaction_model.dart';
+import 'package:money_mate/core/database/app_database.dart';
+import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/models/transaction_model.dart';
 
 /// Thrown when a category cannot be deleted because shared household
 /// records use it (deleting it would change data other members see).

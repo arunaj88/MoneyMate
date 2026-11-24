@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../models/scope_models.dart';
-import '../../../models/transaction_model.dart';
-import '../../../providers/household_provider.dart';
-import '../../../providers/transaction_scope_provider.dart';
-import '../screens/household_screen.dart';
+import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/models/transaction_model.dart';
+import 'package:money_mate/providers/household_provider.dart';
+import 'package:money_mate/providers/transaction_scope_provider.dart';
+import 'package:money_mate/features/household/screens/household_screen.dart';
 
 /// "Shared · Sara" for a shared transaction (with "You" for the user's
 /// own), or null for a personal one. Watch [HouseholdProvider] in the

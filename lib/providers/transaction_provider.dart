@@ -3,15 +3,15 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
-import '../core/services/cloud_history_loader.dart';
-import '../core/services/cloud_transaction_store.dart';
-import '../core/services/transaction_calculator.dart';
-import '../models/category_model.dart';
-import '../models/scope_models.dart';
-import '../models/transaction_model.dart';
-import '../repositories/transaction_repository.dart';
-import 'category_provider.dart';
-import 'transaction_scope_provider.dart';
+import 'package:money_mate/core/services/cloud_history_loader.dart';
+import 'package:money_mate/core/services/cloud_transaction_store.dart';
+import 'package:money_mate/core/services/transaction_calculator.dart';
+import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/models/transaction_model.dart';
+import 'package:money_mate/repositories/transaction_repository.dart';
+import 'package:money_mate/providers/category_provider.dart';
+import 'package:money_mate/providers/transaction_scope_provider.dart';
 
 /// State of loading transactions older than the local retention window.
 enum CloudHistoryStatus { idle, loading, loaded, exhausted, offline, error }

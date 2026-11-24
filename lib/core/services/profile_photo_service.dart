@@ -6,8 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:image/image.dart' as img;
 
-import '../../models/app_user.dart';
-import 'auth_service.dart';
+import 'package:money_mate/models/app_user.dart';
+import 'package:money_mate/core/services/auth_service.dart';
 
 /// A profile photo request that failed, with a message for the user.
 class ProfilePhotoException implements Exception {

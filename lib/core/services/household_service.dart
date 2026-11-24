@@ -4,8 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 
-import '../../models/household_models.dart';
-import 'cloud_transaction_store.dart';
+import 'package:money_mate/models/household_models.dart';
+import 'package:money_mate/core/services/cloud_transaction_store.dart';
 
 /// A household request that failed, with a message for the user.
 class HouseholdException implements Exception {

@@ -2,8 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
-import '../../models/category_model.dart';
-import '../constants/app_constants.dart';
+import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
 
 /// Table and column names, kept in one place to avoid typos in queries.
 class Tables {

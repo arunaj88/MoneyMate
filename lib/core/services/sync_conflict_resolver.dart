@@ -1,6 +1,6 @@
-import '../../models/sync_models.dart';
-import '../../repositories/sync_repository.dart';
-import '../database/app_database.dart';
+import 'package:money_mate/models/sync_models.dart';
+import 'package:money_mate/repositories/sync_repository.dart';
+import 'package:money_mate/core/database/app_database.dart';
 
 /// What to do with a cloud document received during a pull.
 enum PullAction {

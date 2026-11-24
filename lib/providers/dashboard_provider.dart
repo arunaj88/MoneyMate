@@ -1,16 +1,16 @@
 import 'package:flutter/foundation.dart';
 
-import '../core/constants/app_constants.dart';
-import '../core/services/transaction_calculator.dart';
-import '../core/utils/date_range.dart';
-import '../models/category_model.dart';
-import '../models/report_models.dart';
-import '../models/transaction_model.dart';
-import '../repositories/transaction_repository.dart';
-import 'category_provider.dart';
-import 'savings_provider.dart';
-import 'settings_provider.dart';
-import 'transaction_provider.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/services/transaction_calculator.dart';
+import 'package:money_mate/core/utils/date_range.dart';
+import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/models/report_models.dart';
+import 'package:money_mate/models/transaction_model.dart';
+import 'package:money_mate/repositories/transaction_repository.dart';
+import 'package:money_mate/providers/category_provider.dart';
+import 'package:money_mate/providers/savings_provider.dart';
+import 'package:money_mate/providers/settings_provider.dart';
+import 'package:money_mate/providers/transaction_provider.dart';
 
 /// Immutable snapshot of everything shown on the dashboard.
 class DashboardData {

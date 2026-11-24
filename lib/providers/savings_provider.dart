@@ -3,19 +3,19 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
-import '../core/services/cloud_savings_store.dart';
-import '../core/services/cloud_transaction_store.dart';
-import '../core/services/savings_calculator.dart';
-import '../core/utils/date_range.dart';
-import '../core/utils/money.dart';
-import '../models/savings_model.dart';
-import '../models/scope_models.dart';
-import '../models/sync_models.dart';
-import '../repositories/savings_repository.dart';
-import 'auth_provider.dart';
-import 'transaction_provider.dart';
+import 'package:money_mate/core/services/cloud_savings_store.dart';
+import 'package:money_mate/core/services/cloud_transaction_store.dart';
+import 'package:money_mate/core/services/savings_calculator.dart';
+import 'package:money_mate/core/utils/date_range.dart';
+import 'package:money_mate/core/utils/money.dart';
+import 'package:money_mate/models/savings_model.dart';
+import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/models/sync_models.dart';
+import 'package:money_mate/repositories/savings_repository.dart';
+import 'package:money_mate/providers/auth_provider.dart';
+import 'package:money_mate/providers/transaction_provider.dart';
 
-export '../repositories/savings_repository.dart' show SavingsException;
+export 'package:money_mate/repositories/savings_repository.dart' show SavingsException;
 
 /// Savings goals of all three kinds, their history and (for independent
 /// shared goals) members and invitations.

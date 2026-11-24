@@ -1,6 +1,6 @@
-import '../constants/app_constants.dart';
-import '../utils/date_range.dart';
-import '../../models/budget_model.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/utils/date_range.dart';
+import 'package:money_mate/models/budget_model.dart';
 
 /// Pure budget arithmetic.
 ///

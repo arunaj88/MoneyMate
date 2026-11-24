@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/date_range.dart';
-import '../../../core/utils/money.dart';
-import '../../../models/budget_model.dart';
-import '../../../shared/widgets/app_card.dart';
-import '../../../shared/widgets/budget_progress_bar.dart';
-import '../../../shared/widgets/charts.dart';
-import '../../../shared/widgets/label_amount_row.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/core/utils/date_range.dart';
+import 'package:money_mate/core/utils/money.dart';
+import 'package:money_mate/models/budget_model.dart';
+import 'package:money_mate/shared/widgets/app_card.dart';
+import 'package:money_mate/shared/widgets/budget_progress_bar.dart';
+import 'package:money_mate/shared/widgets/charts.dart';
+import 'package:money_mate/shared/widgets/label_amount_row.dart';
 
 /// Spending history for past weeks or months against their targets.
 class BudgetHistoryCard extends StatelessWidget {

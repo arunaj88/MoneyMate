@@ -1,7 +1,7 @@
 import 'package:intl/intl.dart';
 
-import 'scope_models.dart';
-import 'transaction_model.dart';
+import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/models/transaction_model.dart';
 
 /// How often a recurring transaction repeats.
 enum RecurrenceFrequency {

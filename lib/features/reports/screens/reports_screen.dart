@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/money.dart';
-import '../../../providers/report_provider.dart';
-import '../../../providers/settings_provider.dart';
-import '../../../shared/widgets/app_card.dart';
-import '../../../shared/widgets/charts.dart';
-import '../../../shared/widgets/state_views.dart';
-import '../../household/widgets/household_widgets.dart';
-import '../widgets/report_cards.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/core/utils/money.dart';
+import 'package:money_mate/providers/report_provider.dart';
+import 'package:money_mate/providers/settings_provider.dart';
+import 'package:money_mate/shared/widgets/app_card.dart';
+import 'package:money_mate/shared/widgets/charts.dart';
+import 'package:money_mate/shared/widgets/state_views.dart';
+import 'package:money_mate/features/household/widgets/household_widgets.dart';
+import 'package:money_mate/features/reports/widgets/report_cards.dart';
 
 /// Analytics: charts, category breakdown, savings and comparisons.
 class ReportsScreen extends StatelessWidget {

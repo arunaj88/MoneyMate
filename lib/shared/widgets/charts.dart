@@ -3,9 +3,9 @@ import 'dart:math' as math;
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 
-import '../../core/theme/app_theme.dart';
-import '../../core/utils/money.dart';
-import '../../models/report_models.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/core/utils/money.dart';
+import 'package:money_mate/models/report_models.dart';
 
 /// Rounds [maxValue] up to an axis maximum whose quarter is a "nice"
 /// whole number (1, 2 or 5 × 10ⁿ), so the 4 grid lines get clean labels.

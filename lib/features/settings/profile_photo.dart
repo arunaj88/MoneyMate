@@ -3,12 +3,12 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/services/photo_picker.dart';
-import '../../core/services/profile_photo_service.dart';
-import '../../core/theme/app_theme.dart';
-import '../../providers/auth_provider.dart';
-import '../../shared/widgets/dialogs.dart';
-import '../../shared/widgets/user_avatar.dart';
+import 'package:money_mate/core/services/photo_picker.dart';
+import 'package:money_mate/core/services/profile_photo_service.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/providers/auth_provider.dart';
+import 'package:money_mate/shared/widgets/dialogs.dart';
+import 'package:money_mate/shared/widgets/user_avatar.dart';
 
 enum _PhotoChoice { gallery, camera, remove }
 

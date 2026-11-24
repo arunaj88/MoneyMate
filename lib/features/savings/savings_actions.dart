@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../../models/savings_model.dart';
-import 'screens/goal_details_screen.dart';
-import 'screens/goal_form_screen.dart';
-import 'screens/savings_screen.dart';
-import 'widgets/money_entry_sheet.dart';
-import 'widgets/shared_goal_widgets.dart';
+import 'package:money_mate/models/savings_model.dart';
+import 'package:money_mate/features/savings/screens/goal_details_screen.dart';
+import 'package:money_mate/features/savings/screens/goal_form_screen.dart';
+import 'package:money_mate/features/savings/screens/savings_screen.dart';
+import 'package:money_mate/features/savings/widgets/money_entry_sheet.dart';
+import 'package:money_mate/features/savings/widgets/shared_goal_widgets.dart';
 
 /// Opens the Savings screen on the tab of [ownership].
 Future<void> openSavingsScreen(

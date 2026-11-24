@@ -1,21 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../core/utils/date_range.dart';
-import '../features/budget/screens/budget_screen.dart';
-import '../features/dashboard/screens/dashboard_screen.dart';
-import '../features/household/widgets/household_widgets.dart';
-import '../features/reports/screens/reports_screen.dart';
-import '../features/settings/screens/settings_screen.dart';
-import '../features/transactions/screens/transactions_screen.dart';
-import '../features/transactions/transaction_actions.dart';
-import '../models/budget_model.dart';
-import '../providers/budget_provider.dart';
-import '../providers/dashboard_provider.dart';
-import '../providers/notification_provider.dart';
-import '../providers/recurring_provider.dart';
-import '../providers/report_provider.dart';
-import '../shared/widgets/budget_progress_bar.dart';
+import 'package:money_mate/core/utils/date_range.dart';
+import 'package:money_mate/features/budget/screens/budget_screen.dart';
+import 'package:money_mate/features/dashboard/screens/dashboard_screen.dart';
+import 'package:money_mate/features/household/widgets/household_widgets.dart';
+import 'package:money_mate/features/reports/screens/reports_screen.dart';
+import 'package:money_mate/features/settings/screens/settings_screen.dart';
+import 'package:money_mate/features/transactions/screens/transactions_screen.dart';
+import 'package:money_mate/features/transactions/transaction_actions.dart';
+import 'package:money_mate/models/budget_model.dart';
+import 'package:money_mate/providers/budget_provider.dart';
+import 'package:money_mate/providers/dashboard_provider.dart';
+import 'package:money_mate/providers/notification_provider.dart';
+import 'package:money_mate/providers/recurring_provider.dart';
+import 'package:money_mate/providers/report_provider.dart';
+import 'package:money_mate/shared/widgets/budget_progress_bar.dart';
 
 /// Bottom navigation container for the five main sections.
 class HomeShell extends StatefulWidget {

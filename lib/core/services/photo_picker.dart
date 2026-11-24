@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import 'profile_photo_service.dart';
+import 'package:money_mate/core/services/profile_photo_service.dart';
 
 /// Where a new photo comes from.
 enum PhotoSource { gallery, camera }

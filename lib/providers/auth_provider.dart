@@ -3,10 +3,10 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../core/constants/app_constants.dart';
-import '../core/services/auth_service.dart';
-import '../core/services/profile_photo_service.dart';
-import '../models/app_user.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/services/auth_service.dart';
+import 'package:money_mate/core/services/profile_photo_service.dart';
+import 'package:money_mate/models/app_user.dart';
 
 enum AuthStatus { unknown, authenticated, unauthenticated }
 

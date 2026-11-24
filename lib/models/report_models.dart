@@ -1,5 +1,5 @@
-import '../core/utils/date_range.dart';
-import 'category_model.dart';
+import 'package:money_mate/core/utils/date_range.dart';
+import 'package:money_mate/models/category_model.dart';
 
 /// Total amount spent (or earned) in one category.
 class CategoryTotal {

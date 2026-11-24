@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'app_user.dart';
+import 'package:money_mate/models/app_user.dart';
 
 /// A member's role in a household.
 enum HouseholdRole {

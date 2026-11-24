@@ -4,26 +4,26 @@ import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
-import '../core/constants/app_constants.dart';
-import '../core/services/budget_calculator.dart';
-import '../core/services/cloud_history_loader.dart';
-import '../core/services/historical_totals.dart';
-import '../core/services/notification_cloud.dart';
-import '../core/services/notification_events.dart';
-import '../core/utils/date_range.dart';
-import '../core/utils/money.dart';
-import '../models/budget_model.dart';
-import '../models/category_model.dart';
-import '../models/report_models.dart';
-import '../models/scope_models.dart';
-import '../models/transaction_model.dart';
-import '../repositories/app_settings_repository.dart';
-import '../repositories/budget_repository.dart';
-import '../repositories/transaction_repository.dart';
-import 'category_provider.dart';
-import 'household_provider.dart';
-import 'settings_provider.dart';
-import 'transaction_provider.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/services/budget_calculator.dart';
+import 'package:money_mate/core/services/cloud_history_loader.dart';
+import 'package:money_mate/core/services/historical_totals.dart';
+import 'package:money_mate/core/services/notification_cloud.dart';
+import 'package:money_mate/core/services/notification_events.dart';
+import 'package:money_mate/core/utils/date_range.dart';
+import 'package:money_mate/core/utils/money.dart';
+import 'package:money_mate/models/budget_model.dart';
+import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/models/report_models.dart';
+import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/models/transaction_model.dart';
+import 'package:money_mate/repositories/app_settings_repository.dart';
+import 'package:money_mate/repositories/budget_repository.dart';
+import 'package:money_mate/repositories/transaction_repository.dart';
+import 'package:money_mate/providers/category_provider.dart';
+import 'package:money_mate/providers/household_provider.dart';
+import 'package:money_mate/providers/settings_provider.dart';
+import 'package:money_mate/providers/transaction_provider.dart';
 
 /// Budgets of one data scope: personal, or a household's shared budgets.
 class BudgetSet {

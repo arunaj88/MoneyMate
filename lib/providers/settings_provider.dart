@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../core/constants/app_constants.dart';
-import '../core/constants/currencies.dart';
-import '../core/utils/money.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/constants/currencies.dart';
+import 'package:money_mate/core/utils/money.dart';
 
 /// User preferences persisted with SharedPreferences.
 class SettingsProvider extends ChangeNotifier {

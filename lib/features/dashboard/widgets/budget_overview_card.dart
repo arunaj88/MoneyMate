@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/date_range.dart';
-import '../../../core/utils/money.dart';
-import '../../../models/budget_model.dart';
-import '../../../models/scope_models.dart';
-import '../../../providers/budget_provider.dart';
-import '../../../providers/transaction_scope_provider.dart';
-import '../../../shared/widgets/app_card.dart';
-import '../../../shared/widgets/budget_progress_bar.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/core/utils/date_range.dart';
+import 'package:money_mate/core/utils/money.dart';
+import 'package:money_mate/models/budget_model.dart';
+import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/providers/budget_provider.dart';
+import 'package:money_mate/providers/transaction_scope_provider.dart';
+import 'package:money_mate/shared/widgets/app_card.dart';
+import 'package:money_mate/shared/widgets/budget_progress_bar.dart';
 
 /// Weekly and monthly budget progress on the dashboard, for the current
 /// view: personal budgets, or the household's shared budgets.

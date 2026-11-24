@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/money.dart';
-import '../../../models/budget_model.dart';
-import '../../../models/category_model.dart';
-import '../../../providers/budget_provider.dart';
-import '../../../providers/settings_provider.dart';
-import '../../../shared/widgets/category_avatar.dart';
-import '../../../shared/widgets/dialogs.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/core/utils/money.dart';
+import 'package:money_mate/models/budget_model.dart';
+import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/providers/budget_provider.dart';
+import 'package:money_mate/providers/settings_provider.dart';
+import 'package:money_mate/shared/widgets/category_avatar.dart';
+import 'package:money_mate/shared/widgets/dialogs.dart';
 
 /// Opens the editor for a new or existing category budget.
 Future<void> showCategoryBudgetSheet(

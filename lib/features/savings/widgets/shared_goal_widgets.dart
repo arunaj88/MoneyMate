@@ -4,15 +4,15 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/money.dart';
-import '../../../models/app_user.dart';
-import '../../../models/savings_model.dart';
-import '../../../providers/savings_provider.dart';
-import '../../../providers/settings_provider.dart';
-import '../../../shared/widgets/app_card.dart';
-import '../../../shared/widgets/dialogs.dart';
-import '../../../shared/widgets/user_avatar.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/core/utils/money.dart';
+import 'package:money_mate/models/app_user.dart';
+import 'package:money_mate/models/savings_model.dart';
+import 'package:money_mate/providers/savings_provider.dart';
+import 'package:money_mate/providers/settings_provider.dart';
+import 'package:money_mate/shared/widgets/app_card.dart';
+import 'package:money_mate/shared/widgets/dialogs.dart';
+import 'package:money_mate/shared/widgets/user_avatar.dart';
 
 /// Runs [action] and shows its outcome as a snack bar.
 Future<bool> runSavingsAction(

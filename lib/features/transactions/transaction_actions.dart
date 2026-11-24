@@ -3,7 +3,7 @@ import 'package:money_mate/models/transaction_model.dart';
 import 'package:money_mate/providers/transaction_provider.dart';
 import 'package:money_mate/shared/widgets/dialogs.dart';
 import 'package:provider/provider.dart';
-import 'screens/add_edit_transaction_screen.dart';
+import 'package:money_mate/features/transactions/screens/add_edit_transaction_screen.dart';
 
 /// Opens the add/edit form. Pass [transaction] to edit an existing entry.
 Future<void> openTransactionForm(

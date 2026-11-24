@@ -1,9 +1,9 @@
 import 'package:sqflite/sqflite.dart';
 
-import '../core/database/app_database.dart';
-import '../models/budget_model.dart';
-import '../models/scope_models.dart';
-import 'category_repository.dart';
+import 'package:money_mate/core/database/app_database.dart';
+import 'package:money_mate/models/budget_model.dart';
+import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/repositories/category_repository.dart';
 
 /// Data access for overall budget targets and category budgets.
 ///

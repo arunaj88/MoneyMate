@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/money.dart';
-import '../../../providers/report_provider.dart';
-import '../../../shared/widgets/app_card.dart';
-import '../../../shared/widgets/category_avatar.dart';
-import '../../../shared/widgets/label_amount_row.dart';
-import '../../../shared/widgets/stat_widgets.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/core/utils/money.dart';
+import 'package:money_mate/providers/report_provider.dart';
+import 'package:money_mate/shared/widgets/app_card.dart';
+import 'package:money_mate/shared/widgets/category_avatar.dart';
+import 'package:money_mate/shared/widgets/label_amount_row.dart';
+import 'package:money_mate/shared/widgets/stat_widgets.dart';
 
 /// Income, expenses and savings for the selected range.
 class SavingsSummaryCard extends StatelessWidget {

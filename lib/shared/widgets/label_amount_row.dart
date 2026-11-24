@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../core/theme/app_theme.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
 
 /// A label on the left and an amount on the right, for list and card rows.
 ///

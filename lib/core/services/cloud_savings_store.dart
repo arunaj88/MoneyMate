@@ -1,8 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-import '../../models/savings_model.dart';
-import '../../models/sync_models.dart';
-import 'cloud_transaction_store.dart';
+import 'package:money_mate/models/savings_model.dart';
+import 'package:money_mate/models/sync_models.dart';
+import 'package:money_mate/core/services/cloud_transaction_store.dart';
 
 /// A savings change the user is not allowed to make, with a message that
 /// can be shown as is.

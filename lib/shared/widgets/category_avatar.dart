@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../models/category_model.dart';
+import 'package:money_mate/models/category_model.dart';
 
 /// Rounded square showing a category's icon in its colour.
 class CategoryAvatar extends StatelessWidget {

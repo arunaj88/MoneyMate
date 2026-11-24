@@ -4,28 +4,28 @@ import 'package:permission_handler/permission_handler.dart'
     show openAppSettings;
 import 'package:provider/provider.dart';
 
-import '../../../core/constants/app_constants.dart';
-import '../../../core/constants/currencies.dart';
-import '../../../core/services/notification_service.dart';
-import '../../../core/services/photo_picker.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/date_range.dart';
-import '../../../providers/auth_provider.dart';
-import '../../../providers/household_provider.dart';
-import '../../../providers/notification_provider.dart';
-import '../../../providers/recurring_provider.dart';
-import '../../../providers/reset_provider.dart';
-import '../../../providers/savings_provider.dart';
-import '../../../providers/settings_provider.dart';
-import '../../../providers/sync_provider.dart';
-import '../../../shared/widgets/dialogs.dart';
-import '../../household/widgets/household_widgets.dart';
-import '../../savings/savings_actions.dart';
-import '../data_management.dart';
-import '../profile_photo.dart';
-import '../reset_app.dart';
-import 'category_management_screen.dart';
-import 'recurring_screen.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/constants/currencies.dart';
+import 'package:money_mate/core/services/notification_service.dart';
+import 'package:money_mate/core/services/photo_picker.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/core/utils/date_range.dart';
+import 'package:money_mate/providers/auth_provider.dart';
+import 'package:money_mate/providers/household_provider.dart';
+import 'package:money_mate/providers/notification_provider.dart';
+import 'package:money_mate/providers/recurring_provider.dart';
+import 'package:money_mate/providers/reset_provider.dart';
+import 'package:money_mate/providers/savings_provider.dart';
+import 'package:money_mate/providers/settings_provider.dart';
+import 'package:money_mate/providers/sync_provider.dart';
+import 'package:money_mate/shared/widgets/dialogs.dart';
+import 'package:money_mate/features/household/widgets/household_widgets.dart';
+import 'package:money_mate/features/savings/savings_actions.dart';
+import 'package:money_mate/features/settings/data_management.dart';
+import 'package:money_mate/features/settings/profile_photo.dart';
+import 'package:money_mate/features/settings/reset_app.dart';
+import 'package:money_mate/features/settings/screens/category_management_screen.dart';
+import 'package:money_mate/features/settings/screens/recurring_screen.dart';
 
 /// App preferences, notifications, data management and app information.
 class SettingsScreen extends StatelessWidget {

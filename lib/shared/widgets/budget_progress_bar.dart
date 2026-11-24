@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../core/theme/app_theme.dart';
-import '../../models/budget_model.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/models/budget_model.dart';
 
 /// Colour representing how close spending is to its target.
 Color budgetLevelColor(BuildContext context, BudgetAlertLevel level) {

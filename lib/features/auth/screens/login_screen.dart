@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/constants/app_constants.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../providers/auth_provider.dart';
-import '../../../shared/widgets/app_logo.dart';
-import '../../../shared/widgets/dialogs.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/providers/auth_provider.dart';
+import 'package:money_mate/shared/widgets/app_logo.dart';
+import 'package:money_mate/shared/widgets/dialogs.dart';
 
 final _emailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
 

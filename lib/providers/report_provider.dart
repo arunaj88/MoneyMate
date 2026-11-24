@@ -1,18 +1,18 @@
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 
-import '../core/services/cloud_history_loader.dart';
-import '../core/services/cloud_transaction_store.dart';
-import '../core/services/historical_totals.dart';
-import '../core/services/transaction_calculator.dart';
-import '../core/utils/date_range.dart';
-import '../models/category_model.dart';
-import '../models/report_models.dart';
-import '../models/transaction_model.dart';
-import '../repositories/transaction_repository.dart';
-import 'category_provider.dart';
-import 'settings_provider.dart';
-import 'transaction_provider.dart';
+import 'package:money_mate/core/services/cloud_history_loader.dart';
+import 'package:money_mate/core/services/cloud_transaction_store.dart';
+import 'package:money_mate/core/services/historical_totals.dart';
+import 'package:money_mate/core/services/transaction_calculator.dart';
+import 'package:money_mate/core/utils/date_range.dart';
+import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/models/report_models.dart';
+import 'package:money_mate/models/transaction_model.dart';
+import 'package:money_mate/repositories/transaction_repository.dart';
+import 'package:money_mate/providers/category_provider.dart';
+import 'package:money_mate/providers/settings_provider.dart';
+import 'package:money_mate/providers/transaction_provider.dart';
 
 /// Quick date range choices for reports.
 enum ReportRangePreset {

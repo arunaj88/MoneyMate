@@ -1,8 +1,8 @@
-import '../../models/scope_models.dart';
-import '../../models/sync_models.dart';
-import '../../models/transaction_model.dart';
-import 'auth_service.dart';
-import 'transaction_sync_service.dart';
+import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/models/sync_models.dart';
+import 'package:money_mate/models/transaction_model.dart';
+import 'package:money_mate/core/services/auth_service.dart';
+import 'package:money_mate/core/services/transaction_sync_service.dart';
 
 /// Thrown when cloud history cannot be shown for the signed-in account.
 class CloudHistoryUnavailableException implements Exception {

@@ -2,19 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/services/savings_calculator.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/money.dart';
-import '../../../models/savings_model.dart';
-import '../../../providers/savings_provider.dart';
-import '../../../providers/settings_provider.dart';
-import '../../../shared/widgets/app_card.dart';
-import '../../../shared/widgets/dialogs.dart';
-import '../../../shared/widgets/label_amount_row.dart';
-import '../../../shared/widgets/state_views.dart';
-import '../savings_actions.dart';
-import '../widgets/savings_widgets.dart';
-import '../widgets/shared_goal_widgets.dart';
+import 'package:money_mate/core/services/savings_calculator.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/core/utils/money.dart';
+import 'package:money_mate/models/savings_model.dart';
+import 'package:money_mate/providers/savings_provider.dart';
+import 'package:money_mate/providers/settings_provider.dart';
+import 'package:money_mate/shared/widgets/app_card.dart';
+import 'package:money_mate/shared/widgets/dialogs.dart';
+import 'package:money_mate/shared/widgets/label_amount_row.dart';
+import 'package:money_mate/shared/widgets/state_views.dart';
+import 'package:money_mate/features/savings/savings_actions.dart';
+import 'package:money_mate/features/savings/widgets/savings_widgets.dart';
+import 'package:money_mate/features/savings/widgets/shared_goal_widgets.dart';
 
 enum _GoalMenu { pause, resume, complete, reopen, delete }
 

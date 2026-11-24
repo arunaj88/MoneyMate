@@ -1,31 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../core/constants/app_constants.dart';
-import '../core/services/backup_service.dart';
-import '../core/services/file_service.dart';
-import '../core/services/photo_picker.dart';
-import '../core/theme/app_theme.dart';
-import '../core/theme/system_ui.dart';
-import '../features/auth/screens/splash_screen.dart';
-import '../providers/auth_provider.dart';
-import '../providers/budget_provider.dart';
-import '../providers/category_provider.dart';
-import '../providers/dashboard_provider.dart';
-import '../providers/household_provider.dart';
-import '../providers/notification_provider.dart';
-import '../providers/recurring_provider.dart';
-import '../providers/report_provider.dart';
-import '../providers/reset_provider.dart';
-import '../providers/savings_provider.dart';
-import '../providers/settings_provider.dart';
-import '../providers/sync_provider.dart';
-import '../providers/transaction_provider.dart';
-import '../providers/transaction_scope_provider.dart';
-import '../repositories/transaction_repository.dart';
-import '../shared/widgets/keyboard_dismiss.dart';
-import 'app_dependencies.dart';
-import 'auth_navigator.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/services/backup_service.dart';
+import 'package:money_mate/core/services/file_service.dart';
+import 'package:money_mate/core/services/photo_picker.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/core/theme/system_ui.dart';
+import 'package:money_mate/features/auth/screens/splash_screen.dart';
+import 'package:money_mate/providers/auth_provider.dart';
+import 'package:money_mate/providers/budget_provider.dart';
+import 'package:money_mate/providers/category_provider.dart';
+import 'package:money_mate/providers/dashboard_provider.dart';
+import 'package:money_mate/providers/household_provider.dart';
+import 'package:money_mate/providers/notification_provider.dart';
+import 'package:money_mate/providers/recurring_provider.dart';
+import 'package:money_mate/providers/report_provider.dart';
+import 'package:money_mate/providers/reset_provider.dart';
+import 'package:money_mate/providers/savings_provider.dart';
+import 'package:money_mate/providers/settings_provider.dart';
+import 'package:money_mate/providers/sync_provider.dart';
+import 'package:money_mate/providers/transaction_provider.dart';
+import 'package:money_mate/providers/transaction_scope_provider.dart';
+import 'package:money_mate/repositories/transaction_repository.dart';
+import 'package:money_mate/shared/widgets/keyboard_dismiss.dart';
+import 'package:money_mate/app/app_dependencies.dart';
+import 'package:money_mate/app/auth_navigator.dart';
 
 /// Root widget: dependency injection, theming and navigation.
 class MoneyMateApp extends StatefulWidget {

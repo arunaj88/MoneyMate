@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/constants/category_icons.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../models/category_model.dart';
-import '../../../models/transaction_model.dart';
-import '../../../providers/category_provider.dart';
-import '../../../shared/widgets/category_avatar.dart';
-import '../../../shared/widgets/dialogs.dart';
+import 'package:money_mate/core/constants/category_icons.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/models/transaction_model.dart';
+import 'package:money_mate/providers/category_provider.dart';
+import 'package:money_mate/shared/widgets/category_avatar.dart';
+import 'package:money_mate/shared/widgets/dialogs.dart';
 
 /// Lists categories and lets the user add, edit and delete custom ones.
 class CategoryManagementScreen extends StatelessWidget {

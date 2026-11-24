@@ -1,9 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../core/constants/app_constants.dart';
-import '../models/scope_models.dart';
-import 'household_provider.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/providers/household_provider.dart';
 
 /// App-wide choice of which transactions to show: personal or the
 /// household's shared ones. Without a household it is always personal.

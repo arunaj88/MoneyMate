@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
-import '../../models/sync_models.dart';
+import 'package:money_mate/models/sync_models.dart';
 
 /// Thrown when the cloud cannot be reached (offline, timeout, server busy).
 class CloudUnavailableException implements Exception {

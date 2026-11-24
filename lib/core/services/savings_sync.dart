@@ -1,12 +1,12 @@
 import 'package:flutter/foundation.dart';
 
-import '../../models/savings_model.dart';
-import '../../models/sync_models.dart';
-import '../../repositories/savings_repository.dart';
-import '../../repositories/sync_repository.dart';
-import '../constants/app_constants.dart';
-import 'cloud_savings_store.dart';
-import 'cloud_transaction_store.dart';
+import 'package:money_mate/models/savings_model.dart';
+import 'package:money_mate/models/sync_models.dart';
+import 'package:money_mate/repositories/savings_repository.dart';
+import 'package:money_mate/repositories/sync_repository.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/services/cloud_savings_store.dart';
+import 'package:money_mate/core/services/cloud_transaction_store.dart';
 
 /// Synchronises savings goals and their history; run by
 /// `TransactionSyncService` as part of every sync cycle.

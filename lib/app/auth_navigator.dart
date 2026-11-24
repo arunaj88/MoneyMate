@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../features/auth/screens/login_screen.dart';
-import '../providers/auth_provider.dart';
-import 'home_shell.dart';
+import 'package:money_mate/features/auth/screens/login_screen.dart';
+import 'package:money_mate/providers/auth_provider.dart';
+import 'package:money_mate/app/home_shell.dart';
 
 enum _Destination { login, home }
 

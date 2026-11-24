@@ -1,6 +1,6 @@
 import 'package:intl/intl.dart';
 
-import '../constants/currencies.dart';
+import 'package:money_mate/core/constants/currencies.dart';
 
 /// Helpers for converting between user input, minor units and display text.
 ///

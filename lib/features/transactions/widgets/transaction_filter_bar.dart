@@ -4,12 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../models/category_model.dart';
-import '../../../models/transaction_model.dart';
-import '../../../providers/category_provider.dart';
-import '../../../providers/transaction_provider.dart';
-import '../../../shared/widgets/category_avatar.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/models/transaction_model.dart';
+import 'package:money_mate/providers/category_provider.dart';
+import 'package:money_mate/providers/transaction_provider.dart';
+import 'package:money_mate/shared/widgets/category_avatar.dart';
 
 /// Search field with a short debounce so typing doesn't query on every key.
 class TransactionSearchField extends StatefulWidget {

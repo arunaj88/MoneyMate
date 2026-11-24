@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../core/constants/category_icons.dart';
-import 'transaction_model.dart';
+import 'package:money_mate/core/constants/category_icons.dart';
+import 'package:money_mate/models/transaction_model.dart';
 
 /// A spending or income category.
 class CategoryModel {

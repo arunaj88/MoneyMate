@@ -2,20 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/date_range.dart';
-import '../../../core/utils/money.dart';
-import '../../../models/transaction_model.dart';
-import '../../../providers/category_provider.dart';
-import '../../../providers/household_provider.dart';
-import '../../../providers/settings_provider.dart';
-import '../../../providers/transaction_provider.dart';
-import '../../../shared/widgets/label_amount_row.dart';
-import '../../../shared/widgets/state_views.dart';
-import '../../../shared/widgets/transaction_tile.dart';
-import '../../household/widgets/household_widgets.dart';
-import '../transaction_actions.dart';
-import '../widgets/transaction_filter_bar.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/core/utils/date_range.dart';
+import 'package:money_mate/core/utils/money.dart';
+import 'package:money_mate/models/transaction_model.dart';
+import 'package:money_mate/providers/category_provider.dart';
+import 'package:money_mate/providers/household_provider.dart';
+import 'package:money_mate/providers/settings_provider.dart';
+import 'package:money_mate/providers/transaction_provider.dart';
+import 'package:money_mate/shared/widgets/label_amount_row.dart';
+import 'package:money_mate/shared/widgets/state_views.dart';
+import 'package:money_mate/shared/widgets/transaction_tile.dart';
+import 'package:money_mate/features/household/widgets/household_widgets.dart';
+import 'package:money_mate/features/transactions/transaction_actions.dart';
+import 'package:money_mate/features/transactions/widgets/transaction_filter_bar.dart';
 
 /// Transaction history grouped by date with search and filters.
 class TransactionsScreen extends StatelessWidget {

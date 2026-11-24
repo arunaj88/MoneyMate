@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/constants/app_constants.dart';
-import '../../../core/theme/app_theme.dart';
-import '../../../shared/widgets/app_logo.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/shared/widgets/app_logo.dart';
 
 /// First screen shown while the saved Firebase session is checked.
 /// [AuthNavigator] replaces it with the dashboard or the login screen.

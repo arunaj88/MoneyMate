@@ -1,4 +1,4 @@
-import 'transaction_sync_service.dart';
+import 'package:money_mate/core/services/transaction_sync_service.dart';
 
 /// Reset App and Restore My Cloud Data.
 ///

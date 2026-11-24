@@ -1,15 +1,15 @@
 import 'package:flutter/foundation.dart';
 
-import '../core/services/data_reset_service.dart';
-import '../core/services/transaction_sync_service.dart';
-import '../models/scope_models.dart';
-import 'auth_provider.dart';
-import 'budget_provider.dart';
-import 'category_provider.dart';
-import 'household_provider.dart';
-import 'sync_provider.dart';
-import 'transaction_provider.dart';
-import 'transaction_scope_provider.dart';
+import 'package:money_mate/core/services/data_reset_service.dart';
+import 'package:money_mate/core/services/transaction_sync_service.dart';
+import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/providers/auth_provider.dart';
+import 'package:money_mate/providers/budget_provider.dart';
+import 'package:money_mate/providers/category_provider.dart';
+import 'package:money_mate/providers/household_provider.dart';
+import 'package:money_mate/providers/sync_provider.dart';
+import 'package:money_mate/providers/transaction_provider.dart';
+import 'package:money_mate/providers/transaction_scope_provider.dart';
 
 enum ResetStage {
   idle,

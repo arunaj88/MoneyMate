@@ -4,14 +4,14 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
-import '../core/constants/app_constants.dart';
-import '../core/services/notification_cloud.dart';
-import '../core/services/notification_events.dart';
-import '../core/services/notification_service.dart';
-import '../models/transaction_model.dart';
-import 'auth_provider.dart';
-import 'category_provider.dart';
-import 'settings_provider.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/services/notification_cloud.dart';
+import 'package:money_mate/core/services/notification_events.dart';
+import 'package:money_mate/core/services/notification_service.dart';
+import 'package:money_mate/models/transaction_model.dart';
+import 'package:money_mate/providers/auth_provider.dart';
+import 'package:money_mate/providers/category_provider.dart';
+import 'package:money_mate/providers/settings_provider.dart';
 
 /// Push and on-device notifications.
 ///

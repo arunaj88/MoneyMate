@@ -1,6 +1,6 @@
-import 'category_model.dart';
-import 'scope_models.dart';
-import 'transaction_model.dart';
+import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/models/transaction_model.dart';
 
 /// One cloud collection of transactions as seen by the signed-in user:
 /// their personal collection (`users/{uid}/transactions`) or a household's

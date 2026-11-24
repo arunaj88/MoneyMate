@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../core/theme/app_theme.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
 
 /// Rounded card used for every dashboard / report section.
 class AppCard extends StatelessWidget {

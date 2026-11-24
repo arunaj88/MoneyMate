@@ -1,9 +1,9 @@
 import 'package:sqflite/sqflite.dart';
 
-import '../core/database/app_database.dart';
-import '../core/services/recurring_scheduler.dart';
-import '../models/category_model.dart';
-import '../models/recurring_model.dart';
+import 'package:money_mate/core/database/app_database.dart';
+import 'package:money_mate/core/services/recurring_scheduler.dart';
+import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/models/recurring_model.dart';
 
 /// Storage of recurring transaction rules.
 ///

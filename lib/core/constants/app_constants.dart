@@ -1,4 +1,4 @@
-import '../../models/scope_models.dart';
+import 'package:money_mate/models/scope_models.dart';
 
 /// Application-wide constants.
 class AppConstants {

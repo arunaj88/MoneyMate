@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../core/utils/money.dart';
+import 'package:money_mate/core/utils/money.dart';
 
 /// Shows a confirmation dialog. Returns true when the user confirms.
 Future<bool> showConfirmDialog(

@@ -1,5 +1,5 @@
-import '../../models/savings_model.dart';
-import '../utils/date_range.dart';
+import 'package:money_mate/models/savings_model.dart';
+import 'package:money_mate/core/utils/date_range.dart';
 
 /// Pure savings arithmetic, free of I/O so it can be unit tested.
 class SavingsCalculator {

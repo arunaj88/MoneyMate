@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../core/theme/app_theme.dart';
-import 'app_card.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/shared/widgets/app_card.dart';
 
 /// Shows a percentage change. For expenses an increase is bad (red), for
 /// income an increase is good (green) – controlled by [increaseIsGood].

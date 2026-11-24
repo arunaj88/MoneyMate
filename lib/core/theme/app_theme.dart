@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'system_ui.dart';
+import 'package:money_mate/core/theme/system_ui.dart';
 
 /// Brand and semantic colours.
 class AppColors {

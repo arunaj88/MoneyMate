@@ -2,18 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
-import '../core/services/connectivity_monitor.dart';
-import '../core/services/household_service.dart';
-import '../core/services/transaction_sync_service.dart';
-import '../models/scope_models.dart';
-import '../models/sync_models.dart';
-import '../repositories/sync_repository.dart';
-import 'auth_provider.dart';
-import 'budget_provider.dart';
-import 'category_provider.dart';
-import 'household_provider.dart';
-import 'savings_provider.dart';
-import 'transaction_provider.dart';
+import 'package:money_mate/core/services/connectivity_monitor.dart';
+import 'package:money_mate/core/services/household_service.dart';
+import 'package:money_mate/core/services/transaction_sync_service.dart';
+import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/models/sync_models.dart';
+import 'package:money_mate/repositories/sync_repository.dart';
+import 'package:money_mate/providers/auth_provider.dart';
+import 'package:money_mate/providers/budget_provider.dart';
+import 'package:money_mate/providers/category_provider.dart';
+import 'package:money_mate/providers/household_provider.dart';
+import 'package:money_mate/providers/savings_provider.dart';
+import 'package:money_mate/providers/transaction_provider.dart';
 
 enum SyncPhase {
   /// Cloud sync is not configured in this build (e.g. tests).

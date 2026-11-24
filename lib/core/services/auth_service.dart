@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
-import '../../models/app_user.dart';
+import 'package:money_mate/models/app_user.dart';
 
 /// An authentication failure with a message that can be shown to the user.
 class AuthException implements Exception {

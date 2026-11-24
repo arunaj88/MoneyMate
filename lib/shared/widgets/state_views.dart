@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../core/theme/app_theme.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
 
 class LoadingView extends StatelessWidget {
   const LoadingView({super.key, this.padding = const EdgeInsets.all(48)});

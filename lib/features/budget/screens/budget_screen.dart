@@ -1,22 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:money_mate/shared/widgets/state_views.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/money.dart';
-import '../../../models/budget_model.dart';
-import '../../../models/scope_models.dart';
-import '../../../providers/budget_provider.dart';
-import '../../../providers/household_provider.dart';
-import '../../../providers/category_provider.dart';
-import '../../../providers/settings_provider.dart';
-import '../../../shared/widgets/app_card.dart';
-import '../../../shared/widgets/budget_progress_bar.dart';
-import '../../../shared/widgets/category_avatar.dart';
-import '../../../shared/widgets/dialogs.dart';
-import '../../../shared/widgets/state_views.dart';
-import '../widgets/budget_history_card.dart';
-import '../widgets/budget_target_card.dart';
-import '../widgets/category_budget_sheet.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/core/utils/money.dart';
+import 'package:money_mate/models/budget_model.dart';
+import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/providers/budget_provider.dart';
+import 'package:money_mate/providers/household_provider.dart';
+import 'package:money_mate/providers/category_provider.dart';
+import 'package:money_mate/providers/settings_provider.dart';
+import 'package:money_mate/shared/widgets/app_card.dart';
+import 'package:money_mate/shared/widgets/budget_progress_bar.dart';
+import 'package:money_mate/shared/widgets/category_avatar.dart';
+import 'package:money_mate/shared/widgets/dialogs.dart';
+
+import 'package:money_mate/features/budget/widgets/budget_history_card.dart';
+import 'package:money_mate/features/budget/widgets/budget_target_card.dart';
+import 'package:money_mate/features/budget/widgets/category_budget_sheet.dart';
 
 /// Weekly and monthly targets, history and category budgets.
 class BudgetScreen extends StatefulWidget {

@@ -2,17 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/money.dart';
-import '../../../models/category_model.dart';
-import '../../../models/recurring_model.dart';
-import '../../../providers/category_provider.dart';
-import '../../../providers/recurring_provider.dart';
-import '../../../providers/settings_provider.dart';
-import '../../../providers/transaction_provider.dart';
-import '../../../shared/widgets/category_avatar.dart';
-import '../../../shared/widgets/dialogs.dart';
-import '../../../shared/widgets/state_views.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/core/utils/money.dart';
+import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/models/recurring_model.dart';
+import 'package:money_mate/providers/category_provider.dart';
+import 'package:money_mate/providers/recurring_provider.dart';
+import 'package:money_mate/providers/settings_provider.dart';
+import 'package:money_mate/providers/transaction_provider.dart';
+import 'package:money_mate/shared/widgets/category_avatar.dart';
+import 'package:money_mate/shared/widgets/dialogs.dart';
+import 'package:money_mate/shared/widgets/state_views.dart';
 
 /// Lists recurring transactions and lets the user stop them.
 class RecurringScreen extends StatefulWidget {

@@ -1,8 +1,8 @@
 import 'package:uuid/uuid.dart';
 
-import '../../models/recurring_model.dart';
-import '../../models/transaction_model.dart';
-import '../utils/date_range.dart';
+import 'package:money_mate/models/recurring_model.dart';
+import 'package:money_mate/models/transaction_model.dart';
+import 'package:money_mate/core/utils/date_range.dart';
 
 /// Occurrences of one rule that are due, and the rule's next index after
 /// they are stored.

@@ -1,6 +1,6 @@
-import '../../models/budget_model.dart';
-import '../../models/recurring_model.dart';
-import 'notification_cloud.dart';
+import 'package:money_mate/models/budget_model.dart';
+import 'package:money_mate/models/recurring_model.dart';
+import 'package:money_mate/core/services/notification_cloud.dart';
 
 /// A budget that just crossed 80%, 90% or 100% (see BudgetProvider).
 class BudgetAlertEvent {

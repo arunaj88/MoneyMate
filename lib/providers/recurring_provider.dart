@@ -3,12 +3,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
-import '../core/services/notification_events.dart';
-import '../core/services/recurring_scheduler.dart';
-import '../models/recurring_model.dart';
-import '../models/transaction_model.dart';
-import '../repositories/recurring_repository.dart';
-import 'transaction_provider.dart';
+import 'package:money_mate/core/services/notification_events.dart';
+import 'package:money_mate/core/services/recurring_scheduler.dart';
+import 'package:money_mate/models/recurring_model.dart';
+import 'package:money_mate/models/transaction_model.dart';
+import 'package:money_mate/repositories/recurring_repository.dart';
+import 'package:money_mate/providers/transaction_provider.dart';
 
 /// Recurring transactions: creates rules and adds their due occurrences.
 ///

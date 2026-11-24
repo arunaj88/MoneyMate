@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../models/app_user.dart';
+import 'package:money_mate/models/app_user.dart';
 
 /// Circular avatar showing the user's profile photo, or their initials when
 /// there is no photo or it cannot be loaded (for example while offline).

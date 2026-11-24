@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/constants/app_constants.dart';
-import '../../core/services/transaction_sync_service.dart';
-import '../../core/theme/app_theme.dart';
-import '../../providers/auth_provider.dart';
-import '../../providers/budget_provider.dart';
-import '../../providers/category_provider.dart';
-import '../../providers/household_provider.dart';
-import '../../providers/reset_provider.dart';
-import '../../providers/sync_provider.dart';
-import '../../providers/transaction_provider.dart';
-import '../../providers/transaction_scope_provider.dart';
-import '../../shared/widgets/app_card.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/services/transaction_sync_service.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/providers/auth_provider.dart';
+import 'package:money_mate/providers/budget_provider.dart';
+import 'package:money_mate/providers/category_provider.dart';
+import 'package:money_mate/providers/household_provider.dart';
+import 'package:money_mate/providers/reset_provider.dart';
+import 'package:money_mate/providers/sync_provider.dart';
+import 'package:money_mate/providers/transaction_provider.dart';
+import 'package:money_mate/providers/transaction_scope_provider.dart';
+import 'package:money_mate/shared/widgets/app_card.dart';
 
 /// Settings entry for Reset App (this device only). Hidden in builds
 /// without cloud services.

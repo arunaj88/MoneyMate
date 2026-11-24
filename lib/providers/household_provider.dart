@@ -3,11 +3,11 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../core/constants/app_constants.dart';
-import '../core/services/household_service.dart';
-import '../models/app_user.dart';
-import '../models/household_models.dart';
-import 'auth_provider.dart';
+import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/services/household_service.dart';
+import 'package:money_mate/models/app_user.dart';
+import 'package:money_mate/models/household_models.dart';
+import 'package:money_mate/providers/auth_provider.dart';
 
 enum HouseholdPhase {
   /// Household features are not configured in this build (tests).

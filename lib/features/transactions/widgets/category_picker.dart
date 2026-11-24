@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../models/category_model.dart';
-import '../../../shared/widgets/category_avatar.dart';
+import 'package:money_mate/core/theme/app_theme.dart';
+import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/shared/widgets/category_avatar.dart';
 
 /// Grid of selectable categories.
 class CategoryPicker extends StatelessWidget {
