@@ -6,6 +6,7 @@ import 'package:money_mate/app/app_dependencies.dart';
 import 'package:money_mate/app/money_mate_app.dart';
 import 'package:money_mate/core/services/data_reset_service.dart';
 import 'package:money_mate/core/services/household_service.dart';
+import 'package:money_mate/core/services/notification_service.dart';
 import 'package:money_mate/core/services/photo_picker.dart';
 import 'package:money_mate/core/services/profile_photo_service.dart';
 import 'package:money_mate/models/app_user.dart';
@@ -25,6 +26,7 @@ class TestHarness {
     bool withSavings = false,
     this.photos,
     this.photoPicker,
+    this.localNotifier,
   }) : savings = withSavings ? InMemorySavingsRepository() : null,
        auth = FakeAuthService(signedIn: user),
        transactions = InMemoryTransactionRepository(initial: transactions),
@@ -53,6 +55,9 @@ class TestHarness {
   /// Profile photo storage and picker; both are needed for "Change photo".
   final ProfilePhotoService? photos;
   final PhotoPicker? photoPicker;
+
+  /// On-device notifications (and their taps); none by default.
+  final LocalNotifier? localNotifier;
 
   /// While set, opening an account's data waits for it (like a slow
   /// database open).
@@ -129,6 +134,7 @@ class TestHarness {
           householdService: households,
           profilePhotoService: photos,
           photoPicker: photoPicker,
+          localNotifier: localNotifier ?? const NoopLocalNotifier(),
         ),
         minSplashDuration: Duration.zero,
       ),

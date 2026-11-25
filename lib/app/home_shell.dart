@@ -1,20 +1,28 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'package:money_mate/core/services/notification_service.dart';
 import 'package:money_mate/core/utils/date_range.dart';
 import 'package:money_mate/features/budget/screens/budget_screen.dart';
 import 'package:money_mate/features/dashboard/screens/dashboard_screen.dart';
 import 'package:money_mate/features/household/widgets/household_widgets.dart';
 import 'package:money_mate/features/reports/screens/reports_screen.dart';
+import 'package:money_mate/features/savings/savings_actions.dart';
 import 'package:money_mate/features/settings/screens/settings_screen.dart';
 import 'package:money_mate/features/transactions/screens/transactions_screen.dart';
 import 'package:money_mate/features/transactions/transaction_actions.dart';
 import 'package:money_mate/models/budget_model.dart';
+import 'package:money_mate/models/savings_model.dart';
+import 'package:money_mate/models/scope_models.dart';
 import 'package:money_mate/providers/budget_provider.dart';
 import 'package:money_mate/providers/dashboard_provider.dart';
 import 'package:money_mate/providers/notification_provider.dart';
 import 'package:money_mate/providers/recurring_provider.dart';
 import 'package:money_mate/providers/report_provider.dart';
+import 'package:money_mate/providers/sync_provider.dart';
+import 'package:money_mate/providers/transaction_scope_provider.dart';
 import 'package:money_mate/shared/widgets/budget_progress_bar.dart';
 
 /// Bottom navigation container for the five main sections.
@@ -29,6 +37,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int _index = 0;
   DateTime _lastActiveDay = PeriodUtils.dateOnly(DateTime.now());
   bool _showingAlert = false;
+  StreamSubscription<void>? _sharedChanges;
 
   static const _destinations = [
     NavigationDestination(
@@ -62,11 +71,24 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Another member changed shared data: fetch it now, so the open screen
+    // (dashboard, transactions, budgets, savings) shows it.
+    _sharedChanges = context
+        .read<NotificationProvider>()
+        .sharedDataChanges
+        .listen((_) {
+          if (mounted) context.read<SyncProvider>().syncNow();
+        });
+    // Ask for notifications once the signed-in app is actually on screen.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<NotificationProvider>().askOnFirstUse();
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _sharedChanges?.cancel();
     super.dispose();
   }
 
@@ -88,6 +110,53 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 
   void _select(int index) => setState(() => _index = index);
+
+  /// Opens what a tapped notification is about. Anything opened on top of
+  /// the home screen (forms, dialogs, other screens) is closed first.
+  void _openNotificationTarget() {
+    final target = context.read<NotificationProvider>().takePendingTarget();
+    if (target == null) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+    final scope = target.scope;
+    if (scope != null) _showScope(scope);
+    switch (target.destination) {
+      case NotificationDestination.dashboard:
+        _select(0);
+      case NotificationDestination.transactions:
+        _select(1);
+      case NotificationDestination.budget:
+        _select(2);
+      case NotificationDestination.household:
+        openHouseholdScreen(context);
+      case NotificationDestination.savings:
+        openSavingsScreen(
+          context,
+          ownership: switch (target.ownership) {
+            'household' => SavingsOwnership.household,
+            'shared' => SavingsOwnership.shared,
+            _ => SavingsOwnership.personal,
+          },
+        );
+      case NotificationDestination.goal:
+        openGoalDetailsById(context, target.goalId!);
+    }
+  }
+
+  /// Switches the personal / household view (transactions, dashboard and
+  /// reports) and the budget screen to [scope]. A different household (one
+  /// the user has left) leaves the views as they are. While the household
+  /// is still loading (the tap started the app) the household view is
+  /// chosen anyway and applies once it has loaded.
+  void _showScope(DataScope scope) {
+    final views = context.read<TransactionScopeProvider>();
+    final current = views.householdId;
+    if (scope.isHousehold && current != null && scope.householdId != current) {
+      return;
+    }
+    views.setView(scope.isHousehold ? ViewScope.shared : ViewScope.personal);
+    context.read<BudgetProvider>().selectScope(scope);
+  }
 
   void _maybeShowAlerts() {
     if (_showingAlert) return;
@@ -159,6 +228,15 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (hasAlerts) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _maybeShowAlerts();
+      });
+    }
+    // A tapped notification (also the one that started the app).
+    final hasTarget = context.select<NotificationProvider, bool>(
+      (n) => n.pendingTarget != null,
+    );
+    if (hasTarget) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openNotificationTarget();
       });
     }
 

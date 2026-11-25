@@ -67,14 +67,28 @@ class NotificationProvider extends ChangeNotifier
   // ------------------------------------------------------------ wiring
 
   void _start() {
+    _subscriptions.add(
+      _local.taps.listen(
+        _opened,
+        onError: (Object e) => debugPrint('Notification tap error: $e'),
+      ),
+    );
+    unawaited(_launchTap(_local.launchTap));
     final push = _push;
     if (push == null) return;
+    _subscriptions.add(
+      push.taps.listen(
+        _opened,
+        onError: (Object e) => debugPrint('Push tap error: $e'),
+      ),
+    );
+    unawaited(_launchTap(push.launchTap));
     _subscriptions
       ..add(
-        push.foregroundMessages.listen(
-          (n) => unawaited(_local.show(n)),
-          onError: (Object e) => debugPrint('Foreground push error: $e'),
-        ),
+        push.foregroundMessages.listen((n) {
+          if (!push.showsForegroundPushes) unawaited(_safeShow(n));
+          if (changesSharedData(n.data)) _sharedDataChanges.add(null);
+        }, onError: (Object e) => debugPrint('Foreground push error: $e')),
       )
       ..add(
         push.tokenRefreshes.listen((token) {
@@ -87,6 +101,59 @@ class NotificationProvider extends ChangeNotifier
       _permissionKnown = true;
       _notify();
     });
+  }
+
+  // ------------------------------------------------ shared data changes
+
+  final _sharedDataChanges = StreamController<void>.broadcast();
+
+  /// Fires when a push received while the app is open says another member
+  /// changed shared data (transactions, budgets, savings), so the home
+  /// screen syncs now instead of at the next periodic sync.
+  Stream<void> get sharedDataChanges => _sharedDataChanges.stream;
+
+  /// Push types (functions/src/notifications.js) about data that reaches
+  /// this device through sync. Member changes need none: the household
+  /// provider watches the members live.
+  static const _syncedTypes = {
+    'household_transaction',
+    'household_budget',
+    'household_savings',
+    'shared_goal',
+  };
+
+  @visibleForTesting
+  static bool changesSharedData(Map<String, String> data) =>
+      _syncedTypes.contains(data['type']);
+
+  // -------------------------------------------------------------- taps
+
+  NotificationTarget? _pendingTarget;
+
+  /// Where the last tapped notification leads, until the home screen
+  /// takes it with [takePendingTarget]. Kept while signed out or while the
+  /// account's data opens, so a tap that started the app still lands.
+  NotificationTarget? get pendingTarget => _pendingTarget;
+
+  NotificationTarget? takePendingTarget() {
+    final target = _pendingTarget;
+    _pendingTarget = null;
+    return target;
+  }
+
+  void _opened(Map<String, String> data) {
+    if (_disposed) return;
+    _pendingTarget = NotificationTarget.fromData(data);
+    _notify();
+  }
+
+  Future<void> _launchTap(Future<Map<String, String>?> Function() read) async {
+    try {
+      final data = await read();
+      if (data != null) _opened(data);
+    } catch (e) {
+      debugPrint('Notification launch tap unavailable: $e');
+    }
   }
 
   /// Called by the ProxyProvider whenever auth, settings or categories
@@ -111,13 +178,26 @@ class NotificationProvider extends ChangeNotifier
   Future<NotificationPermission> requestPermission() async {
     final push = _push;
     if (push == null) return NotificationPermission.unsupported;
-    await _prefs.setBool(PrefKeys.notificationPermissionAsked, true);
     _permission = await push.requestPermission();
     _permissionKnown = true;
+    // Only once the system has answered: a prompt that could not be shown
+    // (no activity yet) is tried again next time.
+    await _prefs.setBool(PrefKeys.notificationPermissionAsked, true);
     _notify();
     _scheduleSync();
     return _permission;
   }
+
+  /// Shows the system prompt the first time the signed-in app is on
+  /// screen, unless the user has already decided. Called by the home
+  /// screen: the prompt needs a visible activity, so it is not asked from
+  /// the background sync.
+  Future<void> askOnFirstUse() => _serialised(() async {
+    if (_push == null || !_permissionKnown) return;
+    if (_permission != NotificationPermission.notDetermined) return;
+    if (_prefs.getBool(PrefKeys.notificationPermissionAsked) == true) return;
+    await requestPermission();
+  });
 
   /// Re-reads the permission, e.g. after the user returns from the system
   /// settings.
@@ -152,14 +232,6 @@ class NotificationProvider extends ChangeNotifier
       await _unregister(previousUid);
     }
     if (uid == null || !_permissionKnown) return;
-
-    // Ask once, the first time someone signed in uses the app.
-    if (_permission == NotificationPermission.notDetermined &&
-        _prefs.getBool(PrefKeys.notificationPermissionAsked) != true) {
-      await _prefs.setBool(PrefKeys.notificationPermissionAsked, true);
-      _permission = await push.requestPermission();
-      _notify();
-    }
     if (!_permission.isGranted) {
       if (previousUid == uid) await _unregister(uid);
       return;
@@ -204,6 +276,8 @@ class NotificationProvider extends ChangeNotifier
 
   /// Runs while still signed in, so the registration can be deleted.
   Future<void> _beforeSignOut(String uid) => _serialised(() async {
+    // A tap meant for this account must not open for the next one.
+    _pendingTarget = null;
     if (_push == null) return;
     await _unregister(uid);
     await _push.deleteToken();
@@ -234,6 +308,13 @@ class NotificationProvider extends ChangeNotifier
           channel: NotificationChannel.budgetAlerts,
           // A higher level for the same budget and period replaces it.
           tag: 'budget-${household?.key ?? alert.key}',
+          // A tap opens the budget in the right view.
+          data: household == null
+              ? const {'type': 'personal_budget'}
+              : {
+                  'type': 'household_budget',
+                  'householdId': household.householdId,
+                },
         ),
       );
     }
@@ -313,6 +394,7 @@ class NotificationProvider extends ChangeNotifier
     for (final s in _subscriptions) {
       unawaited(s.cancel());
     }
+    unawaited(_sharedDataChanges.close());
     super.dispose();
   }
 }

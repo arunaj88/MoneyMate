@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:money_mate/app/app_dependencies.dart';
 import 'package:money_mate/app/money_mate_app.dart';
 import 'package:money_mate/core/theme/app_theme.dart';
@@ -12,6 +13,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 Future<void> main() async {
   final binding = WidgetsFlutterBinding.ensureInitialized();
+  await _lockPhonesToPortrait(binding);
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   // Draw behind transparent status and navigation bars (edge-to-edge).
   await SystemUi.enableEdgeToEdge(
@@ -32,6 +34,18 @@ Future<void> main() async {
     debugPrint('Start-up failed: $error\n$stack');
     runApp(StartupErrorApp(error: error));
   }
+}
+
+/// Phones stay in portrait; tablets (shortest side 600dp or more) and
+/// desktop builds keep every orientation.
+Future<void> _lockPhonesToPortrait(WidgetsBinding binding) async {
+  if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) return;
+  final views = binding.platformDispatcher.views;
+  if (views.isEmpty) return;
+  final view = views.first;
+  final shortestSide = view.physicalSize.shortestSide / view.devicePixelRatio;
+  if (shortestSide >= 600) return;
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 }
 
 /// Shown if the local database cannot be opened.

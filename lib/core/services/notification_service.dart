@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show Color;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+import 'package:money_mate/models/scope_models.dart';
 
 /// Kinds of notification MoneyMate shows. Each is an Android notification
 /// channel, so people can also mute one kind in the system settings. The
@@ -53,6 +56,7 @@ class AppNotification {
     required this.body,
     required this.channel,
     this.tag,
+    this.data = const {},
   });
 
   final String title;
@@ -63,19 +67,140 @@ class AppNotification {
   /// going from 90% to 100% in the same period).
   final String? tag;
 
+  /// The push's data (type, householdId, goalId, …): where a tap leads.
+  final Map<String, String> data;
+
+  /// What a tap on this notification hands back to the app.
+  Map<String, String> get tapData => {...data, 'channel': channel.id};
+
   @override
   bool operator ==(Object other) =>
       other is AppNotification &&
       other.title == title &&
       other.body == body &&
       other.channel == channel &&
-      other.tag == tag;
+      other.tag == tag &&
+      mapEquals(other.data, data);
 
   @override
-  int get hashCode => Object.hash(title, body, channel, tag);
+  int get hashCode => Object.hash(
+    title,
+    body,
+    channel,
+    tag,
+    Object.hashAllUnordered(
+      data.entries.map((e) => Object.hash(e.key, e.value)),
+    ),
+  );
 
   @override
   String toString() => 'AppNotification(${channel.id}, $title: $body)';
+}
+
+/// The screens a notification tap can open.
+enum NotificationDestination {
+  dashboard,
+  transactions,
+  budget,
+  household,
+  savings,
+  goal,
+}
+
+/// Where tapping a notification takes the user.
+@immutable
+class NotificationTarget {
+  const NotificationTarget(
+    this.destination, {
+    this.goalId,
+    this.ownership,
+    this.scope,
+  });
+
+  final NotificationDestination destination;
+
+  /// For [NotificationDestination.goal].
+  final String? goalId;
+
+  /// Which savings tab to open: 'household' or 'shared'
+  /// ([NotificationDestination.savings]).
+  final String? ownership;
+
+  /// Whose data to show: the personal view or a household's shared view
+  /// (transactions, dashboard and budgets). Null keeps the current view.
+  final DataScope? scope;
+
+  /// Reads the data of a tapped notification: the `type` the Cloud
+  /// Functions send (functions/src/notifications.js) and, for
+  /// notifications made on this device, the channel.
+  factory NotificationTarget.fromData(Map<String, String> data) {
+    final goalId = data['goalId'];
+    final hasGoal = goalId != null && goalId.isNotEmpty;
+    final householdId = data['householdId'];
+    final household = householdId == null || householdId.isEmpty
+        ? null
+        : DataScope.household(householdId);
+    switch (data['type']) {
+      case 'household_transaction':
+        return NotificationTarget(
+          NotificationDestination.transactions,
+          scope: household,
+        );
+      case 'household_member':
+      case 'household_removed':
+        return const NotificationTarget(NotificationDestination.household);
+      case 'household_budget':
+        return NotificationTarget(
+          NotificationDestination.budget,
+          scope: household,
+        );
+      case 'personal_budget':
+        return const NotificationTarget(
+          NotificationDestination.budget,
+          scope: DataScope.personal(),
+        );
+      case 'household_savings':
+      case 'shared_goal':
+        return hasGoal
+            ? NotificationTarget(NotificationDestination.goal, goalId: goalId)
+            : NotificationTarget(
+                NotificationDestination.savings,
+                ownership: data['type'] == 'shared_goal'
+                    ? 'shared'
+                    : 'household',
+              );
+    }
+    return switch (NotificationChannel.fromId(data['channel'])) {
+      NotificationChannel.budgetAlerts => const NotificationTarget(
+        NotificationDestination.budget,
+      ),
+      NotificationChannel.recurring => const NotificationTarget(
+        NotificationDestination.transactions,
+      ),
+      NotificationChannel.savingsUpdates => const NotificationTarget(
+        NotificationDestination.savings,
+      ),
+      NotificationChannel.householdActivity => const NotificationTarget(
+        NotificationDestination.dashboard,
+      ),
+    };
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is NotificationTarget &&
+      other.destination == destination &&
+      other.goalId == goalId &&
+      other.ownership == ownership &&
+      other.scope == scope;
+
+  @override
+  int get hashCode => Object.hash(destination, goalId, ownership, scope);
+
+  @override
+  String toString() =>
+      'NotificationTarget(${destination.name}, goal: $goalId, '
+      'ownership: $ownership, scope: $scope)';
 }
 
 /// Whether the system lets MoneyMate show notifications.
@@ -109,18 +234,36 @@ abstract class PushMessaging {
   /// New tokens issued by FCM while the app runs.
   Stream<String> get tokenRefreshes;
 
-  /// Pushes received while the app is in the foreground. The system shows
-  /// pushes itself only while the app is in the background.
+  /// Pushes received while the app is in the foreground (also those the
+  /// system shows itself, see [showsForegroundPushes]), so the app can
+  /// fetch what they are about.
   Stream<AppNotification> get foregroundMessages;
+
+  /// True when the system shows pushes itself while the app is open (iOS,
+  /// with the presentation options set); elsewhere the app shows them.
+  bool get showsForegroundPushes;
 
   /// Invalidates this installation's token (on sign-out), so pushes for
   /// the previous account can never reach the device.
   Future<void> deleteToken();
+
+  /// The data of the push whose tap started the app, if one did.
+  Future<Map<String, String>?> launchTap();
+
+  /// Taps on pushes the system showed while the app was in the background.
+  Stream<Map<String, String>> get taps;
 }
 
 /// Shows notifications on this device (flutter_local_notifications).
 abstract class LocalNotifier {
   Future<void> show(AppNotification notification);
+
+  /// [AppNotification.tapData] of the notification whose tap started the
+  /// app, if one did.
+  Future<Map<String, String>?> launchTap();
+
+  /// [AppNotification.tapData] of notifications tapped while the app runs.
+  Stream<Map<String, String>> get taps;
 }
 
 /// [PushMessaging] backed by Firebase Cloud Messaging (Android and iOS).
@@ -186,9 +329,11 @@ class FirebasePushMessaging implements PushMessaging {
   Stream<String> get tokenRefreshes => _messaging.onTokenRefresh;
 
   @override
+  // iOS shows foreground pushes itself (presentation options above).
+  bool get showsForegroundPushes => Platform.isIOS;
+
+  @override
   Stream<AppNotification> get foregroundMessages => FirebaseMessaging.onMessage
-      // iOS shows foreground pushes itself (presentation options above).
-      .where((_) => !Platform.isIOS)
       .map(_toNotification)
       .where((n) => n != null)
       .cast<AppNotification>();
@@ -203,8 +348,29 @@ class FirebasePushMessaging implements PushMessaging {
         message.data['channel'] as String? ?? n.android?.channelId,
       ),
       tag: n.android?.tag,
+      data: _stringData(message),
     );
   }
+
+  static Map<String, String> _stringData(RemoteMessage message) => {
+    for (final e in message.data.entries)
+      if (e.value != null) e.key: e.value.toString(),
+  };
+
+  @override
+  Future<Map<String, String>?> launchTap() async {
+    try {
+      final message = await _messaging.getInitialMessage();
+      return message == null ? null : _stringData(message);
+    } catch (e) {
+      debugPrint('Initial push unavailable: $e');
+      return null;
+    }
+  }
+
+  @override
+  Stream<Map<String, String>> get taps =>
+      FirebaseMessaging.onMessageOpenedApp.map(_stringData);
 
   @override
   Future<void> deleteToken() async {
@@ -224,6 +390,7 @@ class SystemLocalNotifier implements LocalNotifier {
 
   final FlutterLocalNotificationsPlugin _plugin;
   Future<bool>? _ready;
+  final _taps = StreamController<Map<String, String>>.broadcast();
 
   static bool get isSupported =>
       !kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS);
@@ -248,6 +415,10 @@ class SystemLocalNotifier implements LocalNotifier {
             requestSoundPermission: false,
           ),
         ),
+        onDidReceiveNotificationResponse: (response) {
+          final data = decodeTapPayload(response.payload);
+          if (data != null) _taps.add(data);
+        },
       );
       final android = _plugin
           .resolvePlatformSpecificImplementation<
@@ -303,7 +474,41 @@ class SystemLocalNotifier implements LocalNotifier {
         iOS: DarwinNotificationDetails(threadIdentifier: n.channel.id),
         macOS: DarwinNotificationDetails(threadIdentifier: n.channel.id),
       ),
+      payload: jsonEncode(n.tapData),
     );
+  }
+
+  @override
+  Future<Map<String, String>?> launchTap() async {
+    if (!await _init()) return null;
+    try {
+      final details = await _plugin.getNotificationAppLaunchDetails();
+      if (details?.didNotificationLaunchApp != true) return null;
+      return decodeTapPayload(details!.notificationResponse?.payload);
+    } catch (e) {
+      debugPrint('Notification launch details unavailable: $e');
+      return null;
+    }
+  }
+
+  @override
+  Stream<Map<String, String>> get taps => _taps.stream;
+}
+
+/// Reads [AppNotification.tapData] back from a local notification's
+/// payload. Null when it is missing or not ours.
+@visibleForTesting
+Map<String, String>? decodeTapPayload(String? payload) {
+  if (payload == null || payload.isEmpty) return null;
+  try {
+    final decoded = jsonDecode(payload);
+    if (decoded is! Map) return null;
+    return {
+      for (final e in decoded.entries)
+        if (e.key is String && e.value != null) e.key as String: '${e.value}',
+    };
+  } on FormatException {
+    return null;
   }
 }
 
@@ -313,4 +518,10 @@ class NoopLocalNotifier implements LocalNotifier {
 
   @override
   Future<void> show(AppNotification notification) async {}
+
+  @override
+  Future<Map<String, String>?> launchTap() async => null;
+
+  @override
+  Stream<Map<String, String>> get taps => const Stream.empty();
 }

@@ -31,9 +31,14 @@ Future<void> openGoalForm(
 
 /// Opens [goal]'s details and history.
 Future<void> openGoalDetails(BuildContext context, SavingsGoal goal) =>
+    openGoalDetailsById(context, goal.id);
+
+/// Opens the details of the goal with [goalId] (e.g. from a notification);
+/// the screen says so when the goal no longer exists.
+Future<void> openGoalDetailsById(BuildContext context, String goalId) =>
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => GoalDetailsScreen(goalId: goal.id),
+        builder: (_) => GoalDetailsScreen(goalId: goalId),
       ),
     );
 

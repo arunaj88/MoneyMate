@@ -20,8 +20,28 @@ class FakePushMessaging implements PushMessaging {
   int prompts = 0;
   int deletedTokens = 0;
 
+  /// The next prompt fails like it does without a visible activity.
+  bool failNextPrompt = false;
+
+  /// Like iOS: the system shows foreground pushes itself.
+  @override
+  bool showsForegroundPushes = false;
+
   final _messages = StreamController<AppNotification>.broadcast();
   final _tokens = StreamController<String>.broadcast();
+  final _taps = StreamController<Map<String, String>>.broadcast();
+
+  /// The push whose tap started the app.
+  Map<String, String>? launchData;
+
+  /// A tap on a push the system showed in the background.
+  void tap(Map<String, String> data) => _taps.add(data);
+
+  @override
+  Future<Map<String, String>?> launchTap() async => launchData;
+
+  @override
+  Stream<Map<String, String>> get taps => _taps.stream;
 
   void receive(AppNotification n) => _messages.add(n);
 
@@ -39,6 +59,10 @@ class FakePushMessaging implements PushMessaging {
   @override
   Future<NotificationPermission> requestPermission() async {
     prompts++;
+    if (failNextPrompt) {
+      failNextPrompt = false;
+      throw StateError('Unable to detect current Android Activity.');
+    }
     if (current == NotificationPermission.notDetermined) current = answer;
     return current;
   }
@@ -62,6 +86,19 @@ class FakePushMessaging implements PushMessaging {
 /// Records what would be shown on the device.
 class RecordingLocalNotifier implements LocalNotifier {
   final List<AppNotification> shown = [];
+  final _taps = StreamController<Map<String, String>>.broadcast();
+
+  /// The notification whose tap started the app.
+  Map<String, String>? launchData;
+
+  /// Taps a notification shown earlier, like the system would.
+  void tap(AppNotification n) => _taps.add(n.tapData);
+
+  @override
+  Future<Map<String, String>?> launchTap() async => launchData;
+
+  @override
+  Stream<Map<String, String>> get taps => _taps.stream;
 
   @override
   Future<void> show(AppNotification notification) async =>

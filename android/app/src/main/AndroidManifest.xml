@@ -14,7 +14,7 @@
         android:name="android.hardware.camera"
         android:required="false" />
     <!-- Android 13+: household, budget and savings notifications. Asked for
-         once after sign-in (lib/providers/notification_provider.dart). -->
+         once the signed-in home screen is shown (lib/app/home_shell.dart). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="MoneyMate"
