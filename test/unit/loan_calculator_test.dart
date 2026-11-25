@@ -115,7 +115,7 @@ void main() {
       );
     });
 
-    test('repayments are split pro rata into principal and interest', () {
+    test('within an instalment, interest is paid first', () {
       final loan = oneTimeLoan(
         principal: aed(10000),
         rateBp: 1000,
@@ -126,9 +126,9 @@ void main() {
       final half = LoanCalculator.snapshot(loan, [
         pay(loan.id, aed(5500), DateTime(2027, 6, 1)),
       ], DateTime(2027, 6, 2));
-      expect(half.principalReceivedMinor, aed(5000));
-      expect(half.interestReceivedMinor, aed(500));
-      expect(half.outstandingPrincipalMinor, aed(5000));
+      expect(half.interestReceivedMinor, aed(1000));
+      expect(half.principalReceivedMinor, aed(4500));
+      expect(half.outstandingPrincipalMinor, aed(5500));
       final full = LoanCalculator.snapshot(loan, [
         pay(loan.id, aed(5500), DateTime(2027, 6, 1), id: 'a'),
         pay(loan.id, aed(5500), DateTime(2027, 9, 1), id: 'b'),
@@ -185,20 +185,22 @@ void main() {
       expect(s.overdueMinor, aed(600));
     });
 
-    test(
-      'early and extra payments cover the next instalments, oldest first',
-      () {
-        final s = LoanCalculator.snapshot(loan, [
-          pay(loan.id, aed(2500), DateTime(2026, 12, 5), id: 'big'),
-        ], DateTime(2026, 12, 6));
-        expect(s.installments[0].status, InstallmentStatus.paid);
-        expect(s.installments[1].status, InstallmentStatus.paid);
-        expect(s.installments[2].receivedMinor, aed(500));
-        expect(s.installments[0].repaymentIds, ['big']);
-        expect(s.installments[2].repaymentIds, ['big']);
-        expect(s.nextDue!.number, 3);
-      },
-    );
+    test('a payment above the EMI reduces the capital, not the next EMI', () {
+      final s = LoanCalculator.snapshot(loan, [
+        pay(loan.id, aed(2500), DateTime(2026, 12, 5), id: 'big'),
+      ], DateTime(2026, 12, 6));
+      final first = s.installments[0];
+      expect(first.isPaid, isTrue);
+      expect(first.extraPrincipalMinor, aed(1500));
+      expect(first.repaymentIds, ['big']);
+      // 12,000 − 1,000 − 1,500 = 9,500 over the 11 months left.
+      expect(s.installments, hasLength(12));
+      expect(s.installments[1].receivedMinor, 0);
+      expect(s.installments[1].expectedMinor, 86364);
+      expect(s.installments.last.expectedMinor, 950000 - 86364 * 10);
+      expect(s.outstandingMinor, aed(9500));
+      expect(s.nextDue!.number, 2);
+    });
 
     test('paying everything completes the loan', () {
       final s = LoanCalculator.snapshot(loan, [
@@ -247,36 +249,41 @@ void main() {
   });
 
   group('schedule changes', () {
-    test('paid and partly paid instalments are kept; the rest is rebuilt', () {
+    test('instalments that received money are kept; the rest is rebuilt', () {
       final loan = monthlyLoan();
       final s = LoanCalculator.snapshot(loan, [
         pay(loan.id, aed(1500), DateTime(2027, 1, 1)),
       ], DateTime(2027, 1, 20));
       final settled = LoanCalculator.settledInstallments(s);
-      expect(settled.map((i) => i.number), [1, 2]);
+      // The first EMI took the extra 500 as capital.
+      expect(settled.map((i) => i.number), [1]);
+      expect(settled.single.expectedMinor, aed(1500));
+      expect(settled.single.principalMinor, aed(1500));
       final rebuilt = LoanCalculator.buildSchedule(
         loanId: loan.id,
         type: LoanRepaymentType.monthly,
-        totalOwedMinor: loan.totalOwedMinor,
+        principalMinor: loan.principalMinor,
         newId: nextId,
         kept: settled,
         installmentMinor: aed(2000),
-        firstDueDate: DateTime(2027, 3, 15),
+        firstDueDate: DateTime(2027, 2, 15),
         dueDay: 15,
       );
-      expect(rebuilt.take(2), settled);
-      // 12,000 − 2,000 kept = 10,000 → five instalments of 2,000.
-      expect(rebuilt.skip(2).map((i) => i.expectedMinor), [
+      expect(rebuilt.first, settled.single);
+      // 12,000 − 1,500 kept = 10,500 → five of 2,000 and one of 500.
+      expect(rebuilt.skip(1).map((i) => i.expectedMinor), [
         for (var n = 0; n < 5; n++) aed(2000),
+        aed(500),
       ]);
-      expect(rebuilt.skip(2).first.number, 3);
-      expect(rebuilt.skip(2).first.dueDate, DateTime(2027, 3, 15));
-      // History is untouched: the same repayment still covers 1½ instalments.
+      expect(rebuilt[1].number, 2);
+      expect(rebuilt[1].dueDate, DateTime(2027, 2, 15));
+      // History is untouched and replaying it changes nothing more.
       final after = LoanCalculator.snapshot(loan.copyWith(schedule: rebuilt), [
         pay(loan.id, aed(1500), DateTime(2027, 1, 1)),
       ], DateTime(2027, 1, 20));
       expect(after.installments[0].isPaid, isTrue);
-      expect(after.installments[1].receivedMinor, aed(500));
+      expect(after.installments[1].receivedMinor, 0);
+      expect(after.installments[1].expectedMinor, aed(2000));
       expect(after.outstandingMinor, aed(10500));
     });
 
@@ -286,7 +293,7 @@ void main() {
         () => LoanCalculator.buildSchedule(
           loanId: loan.id,
           type: LoanRepaymentType.monthly,
-          totalOwedMinor: aed(500),
+          principalMinor: aed(500),
           newId: nextId,
           kept: loan.schedule.take(1).toList(),
           installmentMinor: aed(100),

@@ -295,6 +295,14 @@ class _LoanDetailsScreenState extends State<LoanDetailsScreen> {
                 ],
               ),
             ),
+            if (_revisions(loans.repaymentsOf(loan.id)).isNotEmpty) ...[
+              const SizedBox(height: Spacing.md),
+              _EmiHistoryCard(
+                loan: loan,
+                revisions: _revisions(loans.repaymentsOf(loan.id)),
+                formatter: formatter,
+              ),
+            ],
             const SizedBox(height: Spacing.md),
             AppCard(
               key: const Key('repaymentHistory'),
@@ -367,6 +375,83 @@ class _LoanDetailsScreenState extends State<LoanDetailsScreen> {
           ),
         ),
     ];
+  }
+}
+
+/// Repayments that paid extra capital and revised the EMI, oldest first
+/// (voided ones excluded: their effect is undone).
+List<LoanRepayment> _revisions(List<LoanRepayment> repayments) => [
+  for (final r in repayments.reversed)
+    if (r.counts && (r.allocation?.extraPrincipalMinor ?? 0) > 0) r,
+];
+
+/// The original agreement and every EMI revision since.
+class _EmiHistoryCard extends StatelessWidget {
+  const _EmiHistoryCard({
+    required this.loan,
+    required this.revisions,
+    required this.formatter,
+  });
+
+  final Loan loan;
+  final List<LoanRepayment> revisions;
+  final CurrencyFormatter formatter;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    return AppCard(
+      key: const Key('emiHistory'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SectionHeader(
+            title: 'EMI changes',
+            subtitle: 'Extra repayments reduced the capital',
+          ),
+          const SizedBox(height: Spacing.sm),
+          if (loan.originalInstallmentMinor != null)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              leading: const Icon(Icons.handshake_outlined),
+              title: Text(
+                'Agreed: ${formatter.format(loan.originalInstallmentMinor!)}'
+                '${loan.originalTermMonths == null ? '' : ' × ${loan.originalTermMonths} months'}',
+              ),
+              subtitle: Text(
+                'Lent ${formatter.format(loan.principalMinor)} on '
+                '${lendingDate.format(loan.lentDate)}',
+                style: muted,
+              ),
+            ),
+          for (final r in revisions)
+            ListTile(
+              key: Key('emiRevision-${r.id}'),
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              leading: const Icon(Icons.trending_down_rounded),
+              title: Text(
+                r.allocation!.revisedEmiMinor == null
+                    ? 'Settled early'
+                    : '${r.allocation!.previousEmiMinor == null ? '' : '${formatter.format(r.allocation!.previousEmiMinor!)} → '}'
+                          '${formatter.format(r.allocation!.revisedEmiMinor!)}'
+                          '${r.allocation!.effectiveFrom == null ? '' : ' from ${lendingDate.format(r.allocation!.effectiveFrom!)}'}',
+              ),
+              subtitle: Text(
+                '${formatter.format(r.allocation!.extraPrincipalMinor)} extra '
+                'to capital on ${lendingDate.format(r.date)} · capital '
+                '${formatter.format(r.allocation!.principalAfterMinor)} · '
+                '${r.allocation!.remainingInstallments} month(s) left',
+                style: muted,
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }
 
@@ -558,16 +643,32 @@ class _DetailsCard extends StatelessWidget {
           row('Repayment', loan.repaymentType.label),
           if (loan.isMonthly && loan.installmentMinor != null)
             row(
-              'Monthly instalment',
+              'Current EMI',
               '${formatter.format(loan.installmentMinor!)} on day '
                   '${loan.dueDay ?? loan.firstDueDate?.day}',
+              key: const Key('currentEmiText'),
             ),
+          if (loan.isMonthly &&
+              loan.originalInstallmentMinor != null &&
+              loan.originalInstallmentMinor != loan.installmentMinor)
+            row(
+              'Original EMI',
+              '${formatter.format(loan.originalInstallmentMinor!)}'
+                  '${loan.originalTermMonths == null ? '' : ' × ${loan.originalTermMonths} months'}',
+              key: const Key('originalEmiText'),
+            ),
+          if (loan.isMonthly)
+            row('Instalments left', '${snapshot.remainingInstallments}'),
           if (loan.isMonthly && loan.endDate != null)
             row('Expected to finish', lendingDate.format(loan.endDate!)),
           if (!loan.isMonthly && loan.dueDate != null)
             row('Expected repayment', lendingDate.format(loan.dueDate!)),
           if (loan.interestRateBp > 0) ...[
-            row('Interest', '${loan.interestRateLabel} a year (simple)'),
+            row(
+              'Interest',
+              '${loan.interestRateLabel} a year '
+                  '(${loan.isMonthly ? loan.interestMethod.label.toLowerCase() : 'simple'})',
+            ),
             row('Total interest', formatter.format(loan.interestMinor)),
             row(
               'Principal repaid',

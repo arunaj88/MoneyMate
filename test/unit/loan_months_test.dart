@@ -26,9 +26,9 @@ void main() {
       final schedule = LoanCalculator.buildSchedule(
         loanId: 'l',
         type: LoanRepaymentType.monthly,
-        totalOwedMinor: aed(1000),
+        principalMinor: aed(1000),
         newId: nextId,
-        installmentMinor: q.installmentMinor,
+        months: 3,
         firstDueDate: DateTime(2027, 1, 1),
       );
       expect(schedule.map((i) => i.expectedMinor), [33334, 33334, 33332]);

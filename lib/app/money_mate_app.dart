@@ -230,24 +230,17 @@ List<SingleChildWidget> _accountProviders(
               notifications: notifications,
             ),
   ),
-  ChangeNotifierProxyProvider5<
+  ChangeNotifierProxyProvider4<
     SettingsProvider,
     CategoryProvider,
     TransactionProvider,
     SavingsProvider,
-    LoanProvider,
     DashboardProvider
   >(
     create: (_) => DashboardProvider(data.transactionRepository),
-    update:
-        (_, settings, categories, transactions, savings, loans, dashboard) =>
-            dashboard!..updateDependencies(
-              settings,
-              categories,
-              transactions,
-              savings,
-              loans,
-            ),
+    update: (_, settings, categories, transactions, savings, dashboard) =>
+        dashboard!
+          ..updateDependencies(settings, categories, transactions, savings),
   ),
   ChangeNotifierProxyProvider4<
     SettingsProvider,

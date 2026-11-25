@@ -8,7 +8,6 @@ import 'package:money_mate/models/report_models.dart';
 import 'package:money_mate/models/transaction_model.dart';
 import 'package:money_mate/repositories/transaction_repository.dart';
 import 'package:money_mate/providers/category_provider.dart';
-import 'package:money_mate/providers/loan_provider.dart';
 import 'package:money_mate/providers/savings_provider.dart';
 import 'package:money_mate/providers/settings_provider.dart';
 import 'package:money_mate/providers/transaction_provider.dart';
@@ -26,8 +25,6 @@ class DashboardData {
     required this.monthCategoryShares,
     this.scope = const ScopeFilter.personal(),
     this.savedMinor = 0,
-    this.lentMinor = 0,
-    this.lendingInterestMinor = 0,
   });
 
   /// Which transactions these figures cover.
@@ -41,21 +38,10 @@ class DashboardData {
   /// never part of [balanceMinor], [week] or [month].
   final int savedMinor;
 
-  /// Principal lent from this scope and not yet repaid. Lending is a
-  /// transfer, not an expense, so it is never part of [balanceMinor],
-  /// [week] or [month].
-  final int lentMinor;
-
-  /// Interest received on money lent from this scope: the only part of
-  /// lending that is income. It is not a transaction, so it is added here
-  /// rather than to the income figures.
-  final int lendingInterestMinor;
-
-  /// Money available to spend: [balanceMinor] minus what is in savings
-  /// goals and what is lent out, plus interest received on loans. Adding to
-  /// a goal or lending lowers it; withdrawals and repayments raise it.
-  int get availableMinor =>
-      balanceMinor - savedMinor - lentMinor + lendingInterestMinor;
+  /// Money not set aside in savings: [balanceMinor] minus [savedMinor].
+  /// Adding to a goal lowers it by the same amount the savings total
+  /// rises; a withdrawal does the opposite.
+  int get availableMinor => balanceMinor - savedMinor;
   final PeriodTotals week;
   final PeriodTotals month;
   final int previousWeekExpenseMinor;
@@ -64,11 +50,7 @@ class DashboardData {
   final List<TransactionModel> recentTransactions;
   final List<CategoryShare> monthCategoryShares;
 
-  DashboardData withSaved(
-    int savedMinor, {
-    int? lentMinor,
-    int? lendingInterestMinor,
-  }) => DashboardData(
+  DashboardData withSaved(int savedMinor) => DashboardData(
     balanceMinor: balanceMinor,
     week: week,
     month: month,
@@ -79,8 +61,6 @@ class DashboardData {
     monthCategoryShares: monthCategoryShares,
     scope: scope,
     savedMinor: savedMinor,
-    lentMinor: lentMinor ?? this.lentMinor,
-    lendingInterestMinor: lendingInterestMinor ?? this.lendingInterestMinor,
   );
 
   double? get weekChangePercent => TransactionCalculator.percentChange(
@@ -126,10 +106,7 @@ class DashboardProvider extends ChangeNotifier {
   ScopeFilter _scope = const ScopeFilter.personal();
   Object? _dependencyKey;
   int _savedMinor = 0;
-  int _lentMinor = 0;
-  int _interestMinor = 0;
   SavingsProvider? _savings;
-  LoanProvider? _loans;
 
   DashboardData? get data => _data;
   bool get isLoading => _isLoading;
@@ -148,27 +125,14 @@ class DashboardProvider extends ChangeNotifier {
     CategoryProvider categories,
     TransactionProvider transactions, [
     SavingsProvider? savings,
-    LoanProvider? loans,
   ]) {
     _savings = savings;
-    _loans = loans;
-    final scope = transactions.scopeFilter;
-    final saved = savings?.savedForScope(scope) ?? 0;
-    final lent = loans?.lentOutstandingForScope(scope) ?? 0;
-    final interest = loans?.interestForScope(scope) ?? 0;
-    if (saved != _savedMinor ||
-        lent != _lentMinor ||
-        interest != _interestMinor) {
+    final saved = savings?.savedForScope(transactions.scopeFilter) ?? 0;
+    if (saved != _savedMinor) {
       _savedMinor = saved;
-      _lentMinor = lent;
-      _interestMinor = interest;
       final data = _data;
-      if (data != null && data.scope == scope) {
-        _data = data.withSaved(
-          saved,
-          lentMinor: lent,
-          lendingInterestMinor: interest,
-        );
+      if (data != null && data.scope == transactions.scopeFilter) {
+        _data = data.withSaved(saved);
         Future.microtask(notifyListeners);
       }
     }
@@ -254,9 +218,6 @@ class DashboardProvider extends ChangeNotifier {
         // Personal goals reduce the personal balance, the household's goals
         // the household balance; shared goals neither.
         savedMinor: _savings?.savedForScope(scope) ?? 0,
-        // Money lent from this scope is not available until repaid.
-        lentMinor: _loans?.lentOutstandingForScope(scope) ?? 0,
-        lendingInterestMinor: _loans?.interestForScope(scope) ?? 0,
       );
     } catch (e) {
       if (token != _loadToken) return;

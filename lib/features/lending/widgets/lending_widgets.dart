@@ -329,6 +329,9 @@ class InstallmentTile extends StatelessWidget {
     final theme = Theme.of(context);
     final color = installmentStatusColor(context, view.status);
     final detail = switch (view.status) {
+      InstallmentStatus.paid when view.extraPrincipalMinor > 0 =>
+        'Paid ${formatter.format(view.receivedMinor)}, incl. '
+            '${formatter.format(view.extraPrincipalMinor)} extra to capital',
       InstallmentStatus.paid => 'Paid ${formatter.format(view.receivedMinor)}',
       _ when view.receivedMinor > 0 =>
         '${formatter.format(view.receivedMinor)} paid · '
@@ -412,11 +415,13 @@ class RepaymentTile extends StatelessWidget {
     final theme = Theme.of(context);
     final finance = context.finance;
     final muted = !repayment.counts;
+    final extra = repayment.allocation?.extraPrincipalMinor ?? 0;
     final parts = [
       DateFormat('d MMM yyyy').format(repayment.date),
       repayment.method.label,
       ?recordedBy,
       if (repayment.note.isNotEmpty) repayment.note,
+      if (extra > 0) '${formatter.format(extra)} extra to capital',
     ];
     final String? status;
     if (repayment.voided) {

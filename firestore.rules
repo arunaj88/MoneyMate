@@ -291,6 +291,7 @@ service cloud.firestore {
             && d.interestMinor >= 0
             && d.totalOwedMinor == d.principalMinor + d.interestMinor
             && d.repaymentType in ['monthly', 'oneTime']
+            && (!('interestMethod' in d) || d.interestMethod in ['flat', 'reducing'])
             && d.lentDate is int
             && d.createdAt is int
             && d.schedule is list
@@ -346,6 +347,7 @@ service cloud.firestore {
         && d.method is string
         && d.method.size() <= 32
         && d.voided is bool
+        && (!('allocation' in d) || d.allocation is map)
         && optionalString(d, 'note', 200)
         && optionalString(d, 'userName', 80)
         && optionalString(d, 'installmentId', 128);

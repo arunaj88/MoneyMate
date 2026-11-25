@@ -35,6 +35,28 @@ enum LoanRepaymentType {
       );
 }
 
+/// How interest is worked out. It is chosen when the loan is recorded and
+/// never changed silently.
+enum InterestMethod {
+  /// Simple interest on the amount (still) lent, spread evenly over the
+  /// instalments.
+  flat('Flat'),
+
+  /// Interest each month on the principal still outstanding; instalments
+  /// follow the standard EMI formula `P × r × (1 + r)^n / ((1 + r)^n − 1)`.
+  reducing('Reducing balance');
+
+  const InterestMethod(this.label);
+
+  final String label;
+
+  /// Loans recorded before the choice existed are flat.
+  static InterestMethod fromName(Object? value) =>
+      value == InterestMethod.reducing.name
+      ? InterestMethod.reducing
+      : InterestMethod.flat;
+}
+
 /// Where a loan stands, derived from its schedule and repayments.
 enum LoanStatus {
   active('Active'),
@@ -104,6 +126,7 @@ class LoanInstallment {
     required this.number,
     required this.dueDate,
     required this.expectedMinor,
+    this.interestMinor,
   }) : assert(expectedMinor > 0, 'An instalment must expect money');
 
   final String id;
@@ -114,12 +137,35 @@ class LoanInstallment {
   final DateTime dueDate;
   final int expectedMinor;
 
+  /// The interest part of [expectedMinor]; null for instalments recorded
+  /// before the split was stored (it is then worked out in proportion).
+  final int? interestMinor;
+
+  /// The principal (capital) part of [expectedMinor].
+  int get principalMinor => expectedMinor - (interestMinor ?? 0);
+
+  LoanInstallment copyWith({
+    String? id,
+    int? number,
+    DateTime? dueDate,
+    int? expectedMinor,
+    int? interestMinor,
+  }) => LoanInstallment(
+    id: id ?? this.id,
+    loanId: loanId,
+    number: number ?? this.number,
+    dueDate: dueDate ?? this.dueDate,
+    expectedMinor: expectedMinor ?? this.expectedMinor,
+    interestMinor: interestMinor ?? this.interestMinor,
+  );
+
   Map<String, Object?> toMap() => {
     'id': id,
     'loan_id': loanId,
     'number': number,
     'due_date': dueDate.millisecondsSinceEpoch,
     'expected_minor': expectedMinor,
+    'interest_minor': interestMinor,
   };
 
   factory LoanInstallment.fromMap(Map<String, Object?> map) {
@@ -133,14 +179,19 @@ class LoanInstallment {
       number: map['number']! as int,
       dueDate: DateTime.fromMillisecondsSinceEpoch(map['due_date']! as int),
       expectedMinor: expected,
+      interestMinor: _interestOf(map['interest_minor'], expected),
     );
   }
+
+  static int? _interestOf(Object? value, int expected) =>
+      value is int && value >= 0 && value <= expected ? value : null;
 
   Map<String, Object?> toCloudMap() => {
     'id': id,
     'number': number,
     'dueDate': dueDate.millisecondsSinceEpoch,
     'expectedMinor': expectedMinor,
+    'interestMinor': ?interestMinor,
   };
 
   static LoanInstallment? fromCloudMap(String loanId, Object? data) {
@@ -159,6 +210,7 @@ class LoanInstallment {
       number: number,
       dueDate: DateTime.fromMillisecondsSinceEpoch(due),
       expectedMinor: expected,
+      interestMinor: _interestOf(data['interestMinor'], expected),
     );
   }
 
@@ -169,10 +221,12 @@ class LoanInstallment {
       other.loanId == loanId &&
       other.number == number &&
       other.dueDate == dueDate &&
-      other.expectedMinor == expectedMinor;
+      other.expectedMinor == expectedMinor &&
+      other.interestMinor == interestMinor;
 
   @override
-  int get hashCode => Object.hash(id, loanId, number, dueDate, expectedMinor);
+  int get hashCode =>
+      Object.hash(id, loanId, number, dueDate, expectedMinor, interestMinor);
 }
 
 /// Money lent to someone: who, how much, when, and how it is paid back.
@@ -196,6 +250,9 @@ class Loan {
     required this.principalMinor,
     this.interestRateBp = 0,
     this.interestMinor = 0,
+    this.interestMethod = InterestMethod.flat,
+    this.originalInstallmentMinor,
+    this.originalTermMonths,
     required this.lentDate,
     required this.repaymentType,
     this.installmentMinor,
@@ -227,8 +284,15 @@ class Loan {
   /// Interest rate per year, in basis points (0 = no interest).
   final int interestRateBp;
 
-  /// Total interest agreed for the whole loan.
+  /// Total interest of the schedule (agreed up front; lower after extra
+  /// capital repayments).
   final int interestMinor;
+  final InterestMethod interestMethod;
+
+  /// Monthly loans: the EMI and number of months first agreed. Kept for the
+  /// record when extra repayments revise the EMI.
+  final int? originalInstallmentMinor;
+  final int? originalTermMonths;
   final DateTime lentDate;
   final LoanRepaymentType repaymentType;
 
@@ -288,6 +352,7 @@ class Loan {
     int? principalMinor,
     int? interestRateBp,
     int? interestMinor,
+    InterestMethod? interestMethod,
     DateTime? lentDate,
     LoanRepaymentType? repaymentType,
     int? Function()? installmentMinor,
@@ -309,6 +374,9 @@ class Loan {
     principalMinor: principalMinor ?? this.principalMinor,
     interestRateBp: interestRateBp ?? this.interestRateBp,
     interestMinor: interestMinor ?? this.interestMinor,
+    interestMethod: interestMethod ?? this.interestMethod,
+    originalInstallmentMinor: originalInstallmentMinor,
+    originalTermMonths: originalTermMonths,
     lentDate: lentDate ?? this.lentDate,
     repaymentType: repaymentType ?? this.repaymentType,
     installmentMinor: installmentMinor != null
@@ -344,6 +412,9 @@ class Loan {
     'principal_minor': principalMinor,
     'interest_rate_bp': interestRateBp,
     'interest_minor': interestMinor,
+    'interest_method': interestMethod.name,
+    'original_installment_minor': originalInstallmentMinor,
+    'original_term_months': originalTermMonths,
     'lent_date': lentDate.millisecondsSinceEpoch,
     'repayment_type': repaymentType.name,
     'installment_minor': installmentMinor,
@@ -380,6 +451,9 @@ class Loan {
       principalMinor: principal,
       interestRateBp: (map['interest_rate_bp'] as int?) ?? 0,
       interestMinor: (map['interest_minor'] as int?) ?? 0,
+      interestMethod: InterestMethod.fromName(map['interest_method']),
+      originalInstallmentMinor: map['original_installment_minor'] as int?,
+      originalTermMonths: map['original_term_months'] as int?,
       lentDate: DateTime.fromMillisecondsSinceEpoch(map['lent_date']! as int),
       repaymentType: LoanRepaymentType.fromName(
         map['repayment_type'] as String?,
@@ -414,6 +488,9 @@ class Loan {
     'principalMinor': principalMinor,
     'interestRateBp': interestRateBp,
     'interestMinor': interestMinor,
+    'interestMethod': interestMethod.name,
+    'originalInstallmentMinor': originalInstallmentMinor,
+    'originalTermMonths': originalTermMonths,
     'totalOwedMinor': totalOwedMinor,
     'lentDate': lentDate.millisecondsSinceEpoch,
     'repaymentType': repaymentType.name,
@@ -461,6 +538,9 @@ class Loan {
       principalMinor: principal,
       interestRateBp: (data['interestRateBp'] as int?) ?? 0,
       interestMinor: interest is int && interest >= 0 ? interest : 0,
+      interestMethod: InterestMethod.fromName(data['interestMethod']),
+      originalInstallmentMinor: data['originalInstallmentMinor'] as int?,
+      originalTermMonths: data['originalTermMonths'] as int?,
       lentDate: DateTime.fromMillisecondsSinceEpoch(lent),
       repaymentType: LoanRepaymentType.fromName(
         data['repaymentType'] as String?,
@@ -499,6 +579,114 @@ enum RepaymentSyncState {
       );
 }
 
+/// How one repayment was applied, worked out when it was recorded and kept
+/// with it for the record. It never changes afterwards, even when later
+/// repayments revise the schedule again.
+@immutable
+class RepaymentAllocation {
+  const RepaymentAllocation({
+    this.installmentNumber,
+    this.scheduledEmiMinor = 0,
+    this.appliedToInstallmentMinor = 0,
+    this.interestPortionMinor = 0,
+    this.principalPortionMinor = 0,
+    this.extraPrincipalMinor = 0,
+    required this.principalBeforeMinor,
+    required this.principalAfterMinor,
+    this.previousEmiMinor,
+    this.revisedEmiMinor,
+    required this.remainingInstallments,
+    required this.recalculatedAt,
+    this.effectiveFrom,
+  });
+
+  /// The instalment the scheduled part went to.
+  final int? installmentNumber;
+
+  /// That instalment's amount when the repayment was recorded.
+  final int scheduledEmiMinor;
+
+  /// Paid towards that instalment.
+  final int appliedToInstallmentMinor;
+  final int interestPortionMinor;
+  final int principalPortionMinor;
+
+  /// Paid above the instalment, straight off the capital.
+  final int extraPrincipalMinor;
+  final int principalBeforeMinor;
+  final int principalAfterMinor;
+
+  /// The regular EMI before and after (null without later instalments).
+  final int? previousEmiMinor;
+  final int? revisedEmiMinor;
+  final int remainingInstallments;
+  final DateTime recalculatedAt;
+
+  /// Due date of the first instalment with the revised EMI.
+  final DateTime? effectiveFrom;
+
+  bool get revisedEmi =>
+      extraPrincipalMinor > 0 && revisedEmiMinor != previousEmiMinor;
+
+  Map<String, Object?> toJson() => {
+    'installmentNumber': installmentNumber,
+    'scheduledEmiMinor': scheduledEmiMinor,
+    'appliedToInstallmentMinor': appliedToInstallmentMinor,
+    'interestPortionMinor': interestPortionMinor,
+    'principalPortionMinor': principalPortionMinor,
+    'extraPrincipalMinor': extraPrincipalMinor,
+    'principalBeforeMinor': principalBeforeMinor,
+    'principalAfterMinor': principalAfterMinor,
+    'previousEmiMinor': previousEmiMinor,
+    'revisedEmiMinor': revisedEmiMinor,
+    'remainingInstallments': remainingInstallments,
+    'recalculatedAt': recalculatedAt.millisecondsSinceEpoch,
+    'effectiveFrom': effectiveFrom?.millisecondsSinceEpoch,
+  };
+
+  static RepaymentAllocation? fromJson(Object? raw) {
+    Object? data = raw;
+    if (data is String) {
+      try {
+        data = jsonDecode(data);
+      } on FormatException {
+        return null;
+      }
+    }
+    if (data is! Map) return null;
+    int i(String key) => (data as Map)[key] is int ? data[key] as int : 0;
+    int? n(String key) => (data as Map)[key] is int ? data[key] as int : null;
+    final at = n('recalculatedAt');
+    final from = n('effectiveFrom');
+    if (at == null) return null;
+    return RepaymentAllocation(
+      installmentNumber: n('installmentNumber'),
+      scheduledEmiMinor: i('scheduledEmiMinor'),
+      appliedToInstallmentMinor: i('appliedToInstallmentMinor'),
+      interestPortionMinor: i('interestPortionMinor'),
+      principalPortionMinor: i('principalPortionMinor'),
+      extraPrincipalMinor: i('extraPrincipalMinor'),
+      principalBeforeMinor: i('principalBeforeMinor'),
+      principalAfterMinor: i('principalAfterMinor'),
+      previousEmiMinor: n('previousEmiMinor'),
+      revisedEmiMinor: n('revisedEmiMinor'),
+      remainingInstallments: i('remainingInstallments'),
+      recalculatedAt: DateTime.fromMillisecondsSinceEpoch(at),
+      effectiveFrom: from == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(from),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is RepaymentAllocation &&
+      jsonEncode(other.toJson()) == jsonEncode(toJson());
+
+  @override
+  int get hashCode => jsonEncode(toJson()).hashCode;
+}
+
 /// Money the borrower paid back.
 ///
 /// Repayments are permanent records: they are never edited or deleted. A
@@ -523,6 +711,7 @@ class LoanRepayment {
     this.voidedBy,
     this.voidReason = '',
     this.syncState = RepaymentSyncState.pending,
+    this.allocation,
   }) : assert(amountMinor > 0, 'Amount must be greater than zero');
 
   final String id;
@@ -547,6 +736,9 @@ class LoanRepayment {
   final String voidReason;
   final RepaymentSyncState syncState;
 
+  /// How it was applied when recorded (null for older repayments).
+  final RepaymentAllocation? allocation;
+
   bool get isPending => syncState == RepaymentSyncState.pending;
   bool get isRejected => syncState == RepaymentSyncState.rejected;
 
@@ -569,6 +761,7 @@ class LoanRepayment {
     'voided_at': voidedAt?.millisecondsSinceEpoch,
     'voided_by': voidedBy,
     'void_reason': voidReason,
+    'allocation': allocation == null ? null : jsonEncode(allocation!.toJson()),
   };
 
   factory LoanRepayment.fromMap(Map<String, Object?> map) {
@@ -595,6 +788,7 @@ class LoanRepayment {
       voidedBy: map['voided_by'] as String?,
       voidReason: (map['void_reason'] as String?) ?? '',
       syncState: RepaymentSyncState.fromName(map['sync_status']),
+      allocation: RepaymentAllocation.fromJson(map['allocation']),
     );
   }
 
@@ -612,6 +806,7 @@ class LoanRepayment {
     'voidedAt': voidedAt?.millisecondsSinceEpoch,
     'voidedBy': voidedBy,
     'voidReason': voidReason,
+    if (allocation != null) 'allocation': allocation!.toJson(),
   };
 
   static LoanRepayment? fromCloudMap(
@@ -647,6 +842,7 @@ class LoanRepayment {
       voidedBy: data['voidedBy'] as String?,
       voidReason: (data['voidReason'] as String?) ?? '',
       syncState: RepaymentSyncState.synced,
+      allocation: RepaymentAllocation.fromJson(data['allocation']),
     );
   }
 }
@@ -846,11 +1042,32 @@ class InstallmentView {
     required this.receivedMinor,
     required this.status,
     this.repaymentIds = const [],
+    this.interestMinor = 0,
+    this.extraPrincipalMinor = 0,
   });
 
   final LoanInstallment installment;
   final int receivedMinor;
   final InstallmentStatus status;
+
+  /// The interest part of this instalment (worked out for older records).
+  final int interestMinor;
+
+  /// Extra capital repaid together with this instalment (included in
+  /// [expectedMinor] and [receivedMinor]).
+  final int extraPrincipalMinor;
+
+  /// The principal part, extra capital included.
+  int get principalMinor => expectedMinor - interestMinor;
+
+  /// Received towards interest (interest is paid first within an
+  /// instalment).
+  int get interestPaidMinor =>
+      receivedMinor < interestMinor ? receivedMinor : interestMinor;
+  int get principalPaidMinor => receivedMinor - interestPaidMinor;
+
+  /// What this instalment asked for before any extra capital.
+  int get scheduledMinor => expectedMinor - extraPrincipalMinor;
 
   /// Repayments that went (partly) towards this instalment, oldest first.
   final List<String> repaymentIds;
@@ -873,6 +1090,8 @@ class LoanSnapshot {
     required this.principalReceivedMinor,
     required this.interestReceivedMinor,
     required this.overdueMinor,
+    this.overduePrincipalMinor = 0,
+    this.settlementMinor = 0,
   });
 
   final Loan loan;
@@ -884,6 +1103,19 @@ class LoanSnapshot {
   /// Amount of instalments past their due date that is still unpaid.
   final int overdueMinor;
 
+  /// The principal part of [overdueMinor].
+  final int overduePrincipalMinor;
+
+  /// What settles the loan today: the current instalment plus the capital
+  /// still outstanding after it (later instalments' interest is not owed
+  /// when the capital is repaid early).
+  final int settlementMinor;
+
+  /// The EMI now asked for each month (after any revisions).
+  int? get currentEmiMinor => loan.isMonthly ? loan.installmentMinor : null;
+
+  /// Unpaid instalments left.
+  int get remainingInstallments => installments.where((i) => !i.isPaid).length;
   String get id => loan.id;
   int get receivedMinor => loan.receivedMinor;
   int get outstandingMinor => loan.outstandingMinor;

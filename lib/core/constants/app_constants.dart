@@ -9,7 +9,7 @@ class AppConstants {
   static const String appTagline = 'Offline-first personal expense tracker';
 
   static const String databaseName = 'money_mate.db';
-  static const int databaseVersion = 7;
+  static const int databaseVersion = 8;
 
   /// Version of the JSON backup format. Bump when the structure changes.
   static const int backupSchemaVersion = 1;

@@ -68,6 +68,54 @@ void main() {
       await v7.close();
     });
 
+    test('v7 → v8 keeps loans flat and adds the payment records', () async {
+      final v7 = await AppDatabase.openAtPath(
+        databaseFactoryFfiNoIsolate,
+        path,
+        version: 7,
+      );
+      final old = oneTimeLoan(id: 'old');
+      final row = old.toMap()
+        ..remove('interest_method')
+        ..remove('original_installment_minor')
+        ..remove('original_term_months');
+      await v7.db.insert(Tables.loans, row);
+      final inst = old.schedule.single.toMap()..remove('interest_minor');
+      await v7.db.insert(Tables.loanInstallments, inst);
+      await v7.close();
+
+      final v8 = await open();
+      final repo = SqliteLoanRepository(v8);
+      final loan = (await repo.getLoans()).single;
+      expect(loan.interestMethod, InterestMethod.flat);
+      expect(loan.schedule.single.interestMinor, isNull);
+      expect(
+        loan.schedule.single.expectedMinor,
+        old.schedule.single.expectedMinor,
+      );
+      // Repayments can carry their allocation now.
+      final allocation = RepaymentAllocation(
+        extraPrincipalMinor: 500,
+        principalBeforeMinor: 1000,
+        principalAfterMinor: 400,
+        remainingInstallments: 0,
+        recalculatedAt: DateTime(2026, 11, 2),
+      );
+      await repo.addRepayment(
+        LoanRepayment(
+          id: 'r',
+          loanId: 'old',
+          amountMinor: 100,
+          date: DateTime(2026, 11, 2),
+          createdAt: DateTime(2026, 11, 2),
+          updatedAt: DateTime(2026, 11, 2),
+          allocation: allocation,
+        ),
+      );
+      expect((await repo.getRepayments()).single.allocation, allocation);
+      await v8.close();
+    });
+
     test('a fresh install has the lending tables too', () async {
       final db = await AppDatabase.openInMemory(databaseFactoryFfiNoIsolate);
       final repo = SqliteLoanRepository(db);
@@ -89,7 +137,11 @@ void main() {
     tearDown(() => db.close());
 
     test('loans keep their schedule, settings and derived totals', () async {
-      final loan = monthlyLoan(installment: aed(1120), rateBp: 1200);
+      final loan = monthlyLoan(
+        months: 12,
+        rateBp: 1200,
+        method: InterestMethod.reducing,
+      );
       await repo.insertLoan(
         loan,
         LoanReminderSettings(
@@ -103,6 +155,14 @@ void main() {
       final stored = (await repo.getLoans()).single;
       expect(stored.borrowerName, 'John');
       expect(stored.interestMinor, loan.interestMinor);
+      expect(stored.interestMethod, InterestMethod.reducing);
+      expect(stored.originalInstallmentMinor, loan.originalInstallmentMinor);
+      expect(stored.originalTermMonths, 12);
+      // Each instalment keeps its interest part.
+      expect(
+        [for (final i in stored.schedule) i.interestMinor],
+        [for (final i in loan.schedule) i.interestMinor],
+      );
       expect(stored.schedule, loan.schedule);
       expect(stored.receivedMinor, aed(1500));
       expect(stored.pendingRepayments, 1);

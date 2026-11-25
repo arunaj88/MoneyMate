@@ -85,6 +85,8 @@ void main() {
       lentDate: lent,
       repaymentType: LoanRepaymentType.monthly,
       installmentMinor: 100000,
+      originalInstallmentMinor: 100000,
+      originalTermMonths: 3,
       firstDueDate: first,
       dueDay: first.day,
       householdId: householdId,
@@ -93,7 +95,7 @@ void main() {
       schedule: LoanCalculator.buildSchedule(
         loanId: id,
         type: LoanRepaymentType.monthly,
-        totalOwedMinor: 300000,
+        principalMinor: 300000,
         newId: () => '$id-${++n}',
         installmentMinor: 100000,
         firstDueDate: first,
@@ -225,7 +227,6 @@ void main() {
     await tester.pumpAndSettle();
     await openTab(tester, 'Dashboard');
     expect(textOf(tester, 'balanceText'), 'AED 20,000.00');
-    expect(textOf(tester, 'balanceLentText'), 'Lent out: AED 0.00');
     expect(app.transactions.items, hasLength(1));
   });
 
@@ -264,7 +265,45 @@ void main() {
     expect(loan.schedule, hasLength(6));
   });
 
-  testWidgets('money lent leaves the available balance until repaid', (
+  testWidgets('an extra payment shows how it reduces capital and the EMI', (
+    tester,
+  ) async {
+    final app = TestHarness(withLoans: true);
+    // AED 3,000 at AED 1,000 a month, first EMI in 10 days.
+    final loan = seededLoan(firstDueInDays: 10);
+    app.loans!.loans[loan.id] = loan;
+    await app.pump(tester);
+    await openLending(tester);
+    await tapVisible(tester, find.byKey(Key('loanTile-${loan.id}')));
+
+    await tester.tap(find.byKey(const Key('recordRepaymentButton')));
+    await tester.pumpAndSettle();
+    // The scheduled EMI alone: nothing to explain.
+    expect(find.byKey(const Key('extraPaymentPanel')), findsNothing);
+    await tester.enterText(
+      find.byKey(const Key('repaymentAmountField')),
+      '1500',
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('extraPaymentPanel')), findsOneWidget);
+    expect(textOf(tester, 'extraToCapitalText'), 'AED 500.00');
+    // 3,000 − 1,000 − 500 = 1,500 over the 2 months left.
+    expect(textOf(tester, 'revisedEmiText'), 'AED 1,000.00 → AED 750.00');
+    expect(
+      find.text('The extra reduces the capital and lowers the remaining EMIs'),
+      findsOneWidget,
+    );
+    await tapVisible(tester, find.byKey(const Key('saveRepaymentButton')));
+
+    final repayment = app.loans!.repayments.values.single;
+    expect(repayment.allocation!.extraPrincipalMinor, 50000);
+    expect(repayment.allocation!.revisedEmiMinor, 75000);
+    await scrollTo(tester, find.byKey(const Key('emiHistory')));
+    expect(find.textContaining('AED 1,000.00 → AED 750.00'), findsWidgets);
+    expect(find.text('Agreed: AED 1,000.00 × 3 months'), findsOneWidget);
+  });
+
+  testWidgets('money lent stays out of the balance and month income', (
     tester,
   ) async {
     final app = TestHarness(
@@ -282,12 +321,19 @@ void main() {
     final loan = seededLoan(firstDueInDays: 10);
     app.loans!.loans[loan.id] = loan;
     await app.pump(tester);
-    expect(find.text('Available balance'), findsOneWidget);
-    expect(textOf(tester, 'balanceText'), 'AED 17,000.00');
-    expect(textOf(tester, 'balanceLentText'), 'Lent out: AED 3,000.00');
+    // The balance card is income minus expenses only, with no lending.
+    expect(find.text('Total balance'), findsOneWidget);
+    expect(textOf(tester, 'balanceText'), 'AED 20,000.00');
+    expect(find.byKey(const Key('balanceLentText')), findsNothing);
+    expect(find.text('AED 20,000.00'), findsWidgets);
+    // Lending has its own card.
     final card = find.byKey(const Key('lendingOverviewCard'));
     await tester.ensureVisible(card);
-    expect(card, findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(of: card, matching: find.text('AED 3,000.00')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('a reminder tap opens the instalment; nothing is recorded '

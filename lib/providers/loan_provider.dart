@@ -74,15 +74,16 @@ class ReminderMember {
 /// Money lent (loans given), personal and household: records, schedules,
 /// repayments, figures for the dashboard and repayment reminders.
 ///
-/// * **Personal** loans belong to the signed-in user. Lending lowers their
-///   personal available balance; repaid principal raises it again.
+/// * **Personal** loans belong to the signed-in user and show in the
+///   personal view.
 /// * **Household** loans belong to the user's current household (existing
-///   membership decides access). They affect only the household's balance.
+///   membership decides access) and show in the household view.
 ///
-/// Lending is never an expense and repaid principal never income: none of
-/// it is a transaction, so reports, budgets and savings are unaffected.
-/// Only the interest part of repayments is income, shown in the lending
-/// figures and added to the available balance.
+/// Lending is kept completely separate from the money figures: it is never
+/// an expense and repaid principal is never income. None of it is a
+/// transaction, so the balance, month income and expenses, reports,
+/// budgets and savings are unaffected; money lent has its own card and
+/// screen. Interest received is shown only in the lending figures.
 ///
 /// Everything except voiding a repayment works offline. Repayment
 /// reminders are local notifications scheduled on this device for the
@@ -222,8 +223,7 @@ class LoanProvider extends ChangeNotifier {
         s,
   ];
 
-  /// Principal lent from [scope]'s balance and not yet repaid: it is not
-  /// available to spend.
+  /// Principal lent in [scope] and not yet repaid.
   int lentOutstandingForScope(ScopeFilter scope) =>
       LoanCalculator.summarize(_ofScope(scope)).outstandingPrincipalMinor;
 
@@ -468,6 +468,10 @@ class LoanProvider extends ChangeNotifier {
 
   /// Records money lent. Throws [LoanException] for invalid input or when
   /// a household loan is requested without a household.
+  ///
+  /// Monthly loans are repaid at [installmentMinor] a month, or over
+  /// [months] instalments (the EMI is then calculated), with interest
+  /// worked out by [interestMethod].
   Future<Loan> createLoan({
     required String borrowerName,
     String borrowerPhone = '',
@@ -476,27 +480,18 @@ class LoanProvider extends ChangeNotifier {
     required DateTime lentDate,
     required LoanRepaymentType repaymentType,
     int interestRateBp = 0,
+    InterestMethod interestMethod = InterestMethod.flat,
     int? installmentMinor,
+    int? months,
     DateTime? firstDueDate,
     int? dueDay,
     DateTime? endDate,
     DateTime? dueDate,
     String notes = '',
     bool household = false,
-    int? months,
   }) async {
     final repository = _requireRepository();
     final now = _clock();
-    // Repaid over a number of months: the monthly amount follows from it.
-    final byMonths =
-        repaymentType == LoanRepaymentType.monthly && months != null
-        ? LoanCalculator.quoteForMonths(
-            principalMinor: principalMinor,
-            interestRateBp: interestRateBp,
-            months: months,
-          )
-        : null;
-    installmentMinor = byMonths?.installmentMinor ?? installmentMinor;
     if (household && _householdId == null) {
       throw const LoanException(
         'Join or create a household to record household lending.',
@@ -505,6 +500,7 @@ class LoanProvider extends ChangeNotifier {
     if (household && _uid == null) {
       throw const LoanException('Sign in to record household lending.');
     }
+    final isMonthly = repaymentType == LoanRepaymentType.monthly;
     final terms = _validateTerms(
       borrowerName: borrowerName,
       borrowerPhone: borrowerPhone,
@@ -513,7 +509,7 @@ class LoanProvider extends ChangeNotifier {
       lentDate: lentDate,
       repaymentType: repaymentType,
       interestRateBp: interestRateBp,
-      installmentMinor: installmentMinor,
+      installmentMinor: isMonthly && months != null ? 1 : installmentMinor,
       firstDueDate: firstDueDate,
       dueDay: dueDay,
       endDate: endDate,
@@ -522,26 +518,28 @@ class LoanProvider extends ChangeNotifier {
       now: now,
     );
     final id = _uuid.v4();
-    final interest =
-        byMonths?.interestMinor ??
-        LoanCalculator.quote(
-          principalMinor: principalMinor,
-          interestRateBp: interestRateBp,
-          type: repaymentType,
-          lentDate: terms.lentDate,
-          installmentMinor: installmentMinor,
-          dueDate: terms.dueDate,
-        ).interestMinor;
     final schedule = LoanCalculator.buildSchedule(
       loanId: id,
       type: repaymentType,
-      totalOwedMinor: principalMinor + interest,
+      principalMinor: principalMinor,
       newId: _uuid.v4,
-      installmentMinor: installmentMinor,
+      method: interestMethod,
+      interestRateBp: interestRateBp,
+      installmentMinor: months == null ? installmentMinor : null,
+      months: isMonthly ? months : null,
       firstDueDate: terms.firstDueDate,
       dueDay: terms.dueDay,
       dueDate: terms.dueDate,
+      oneTimeInterestMinor: isMonthly || terms.dueDate == null
+          ? 0
+          : LoanCalculator.oneTimeInterest(
+              principalMinor,
+              interestRateBp,
+              terms.lentDate,
+              terms.dueDate!,
+            ),
     );
+    final emi = isMonthly ? schedule.first.expectedMinor : null;
     final loan = Loan(
       id: id,
       borrowerName: borrowerName.trim(),
@@ -549,12 +547,13 @@ class LoanProvider extends ChangeNotifier {
       borrowerEmail: borrowerEmail.trim().toLowerCase(),
       principalMinor: principalMinor,
       interestRateBp: interestRateBp,
-      interestMinor: interest,
+      interestMinor: _interestOf(schedule),
+      interestMethod: interestMethod,
+      originalInstallmentMinor: emi,
+      originalTermMonths: isMonthly ? schedule.length : null,
       lentDate: terms.lentDate,
       repaymentType: repaymentType,
-      installmentMinor: repaymentType == LoanRepaymentType.monthly
-          ? installmentMinor
-          : null,
+      installmentMinor: emi,
       firstDueDate: terms.firstDueDate,
       dueDay: terms.dueDay,
       endDate: terms.endDate,
@@ -581,10 +580,13 @@ class LoanProvider extends ChangeNotifier {
     return loan;
   }
 
-  /// Saves edited details of [loan]. When the amount, interest or schedule
-  /// terms change, instalments that already received money are kept as
-  /// they are and only the unpaid rest of the schedule is recalculated;
-  /// repayment history is never changed.
+  static int _interestOf(List<LoanInstallment> schedule) =>
+      schedule.fold(0, (s, i) => s + (i.interestMinor ?? 0));
+
+  /// Saves edited details of [snapshot]'s loan. When the amount, interest
+  /// or schedule terms change, instalments that already received money
+  /// (extra capital included) are kept as they are and only the unpaid
+  /// rest is recalculated; repayment history is never changed.
   Future<void> updateLoan(
     LoanSnapshot snapshot, {
     required String borrowerName,
@@ -594,26 +596,20 @@ class LoanProvider extends ChangeNotifier {
     required DateTime lentDate,
     required LoanRepaymentType repaymentType,
     int interestRateBp = 0,
+    InterestMethod? interestMethod,
     int? installmentMinor,
+    int? months,
     DateTime? firstDueDate,
     int? dueDay,
     DateTime? endDate,
     DateTime? dueDate,
     String notes = '',
-    int? months,
   }) async {
     final loan = snapshot.loan;
     _checkManage(loan);
     final now = _clock();
-    final byMonths =
-        repaymentType == LoanRepaymentType.monthly && months != null
-        ? LoanCalculator.quoteForMonths(
-            principalMinor: principalMinor,
-            interestRateBp: interestRateBp,
-            months: months,
-          )
-        : null;
-    installmentMinor = byMonths?.installmentMinor ?? installmentMinor;
+    final method = interestMethod ?? loan.interestMethod;
+    final isMonthly = repaymentType == LoanRepaymentType.monthly;
     final terms = _validateTerms(
       borrowerName: borrowerName,
       borrowerPhone: borrowerPhone,
@@ -622,7 +618,7 @@ class LoanProvider extends ChangeNotifier {
       lentDate: lentDate,
       repaymentType: repaymentType,
       interestRateBp: interestRateBp,
-      installmentMinor: installmentMinor,
+      installmentMinor: isMonthly && months != null ? 1 : installmentMinor,
       firstDueDate: firstDueDate,
       dueDay: dueDay,
       endDate: endDate,
@@ -631,48 +627,47 @@ class LoanProvider extends ChangeNotifier {
       now: now,
       earliestRepayment: _earliestRepayment(loan.id),
     );
-    final isMonthly = repaymentType == LoanRepaymentType.monthly;
     final termsChanged =
         principalMinor != loan.principalMinor ||
         interestRateBp != loan.interestRateBp ||
+        method != loan.interestMethod ||
         terms.lentDate != loan.lentDate ||
         repaymentType != loan.repaymentType ||
         (isMonthly &&
-            (installmentMinor != loan.installmentMinor ||
+            ((months == null && installmentMinor != loan.installmentMinor) ||
+                (months != null && months != loan.schedule.length) ||
                 terms.firstDueDate != loan.firstDueDate ||
                 terms.dueDay != loan.dueDay)) ||
         (!isMonthly && terms.dueDate != loan.dueDate);
 
-    var interest = loan.interestMinor;
     var schedule = loan.schedule;
     if (termsChanged) {
-      interest =
-          byMonths?.interestMinor ??
-          LoanCalculator.quote(
-            principalMinor: principalMinor,
-            interestRateBp: interestRateBp,
-            type: repaymentType,
-            lentDate: terms.lentDate,
-            installmentMinor: installmentMinor,
-            dueDate: terms.dueDate,
-          ).interestMinor;
-      final total = principalMinor + interest;
+      if (principalMinor < snapshot.principalReceivedMinor) {
+        throw LoanException(
+          'The amount lent cannot be less than the capital already repaid '
+          '(${_formatter.format(snapshot.principalReceivedMinor)}).',
+        );
+      }
+      schedule = _rebuild(
+        snapshot,
+        type: repaymentType,
+        principalMinor: principalMinor,
+        method: method,
+        rateBp: interestRateBp,
+        installmentMinor: months == null ? installmentMinor : null,
+        months: isMonthly ? months : null,
+        firstDueDate: terms.firstDueDate,
+        dueDay: terms.dueDay,
+        dueDate: terms.dueDate,
+        lentDate: terms.lentDate,
+      );
+      final total = principalMinor + _interestOf(schedule);
       if (total < snapshot.receivedMinor) {
         throw LoanException(
           'The total owed cannot be less than what has already been repaid '
           '(${_formatter.format(snapshot.receivedMinor)}).',
         );
       }
-      schedule = _rebuild(
-        snapshot,
-        type: repaymentType,
-        totalOwedMinor: total,
-        installmentMinor: installmentMinor,
-        firstDueDate: terms.firstDueDate,
-        dueDay: terms.dueDay,
-        dueDate: terms.dueDate,
-        continueSeries: true,
-      );
     }
     await _saveLoan(
       loan.copyWith(
@@ -681,10 +676,11 @@ class LoanProvider extends ChangeNotifier {
         borrowerEmail: borrowerEmail.trim().toLowerCase(),
         principalMinor: principalMinor,
         interestRateBp: interestRateBp,
-        interestMinor: interest,
+        interestMethod: method,
+        interestMinor: _interestOf(schedule),
         lentDate: terms.lentDate,
         repaymentType: repaymentType,
-        installmentMinor: () => isMonthly ? installmentMinor : null,
+        installmentMinor: () => isMonthly ? _emiOf(schedule, snapshot) : null,
         firstDueDate: () => terms.firstDueDate,
         dueDay: () => terms.dueDay,
         endDate: () => terms.endDate,
@@ -697,11 +693,24 @@ class LoanProvider extends ChangeNotifier {
     );
   }
 
-  /// Changes the unpaid part of the schedule. Monthly loans get a new
-  /// instalment amount (or the amount that repays the rest in [months]
-  /// instalments) from [nextDueDate] on [dueDay]; one-time loans a new
-  /// expected date. Paid and partly paid instalments, interest and history
-  /// stay as they are.
+  /// The regular EMI of [schedule]: the first instalment that has not
+  /// received money yet.
+  static int? _emiOf(List<LoanInstallment> schedule, LoanSnapshot snapshot) {
+    final settled = {
+      for (final i in snapshot.installments)
+        if (i.receivedMinor > 0) i.id,
+    };
+    for (final i in schedule) {
+      if (!settled.contains(i.id)) return i.expectedMinor;
+    }
+    return schedule.isEmpty ? null : schedule.last.expectedMinor;
+  }
+
+  /// Changes the unpaid part of the schedule. Monthly loans repay the
+  /// capital still outstanding at a new instalment amount (or over [months]
+  /// instalments) from [nextDueDate] on [dueDay]; one-time loans get a new
+  /// expected date. Paid and partly paid instalments and history stay as
+  /// they are.
   Future<void> reschedule(
     LoanSnapshot snapshot, {
     int? installmentMinor,
@@ -718,13 +727,15 @@ class LoanProvider extends ChangeNotifier {
     final now = _clock();
     final List<LoanInstallment> schedule;
     if (loan.isMonthly) {
-      final amount = months == null
-          ? installmentMinor ?? 0
-          : monthlyAmountForRest(snapshot, months);
-      if (amount <= 0 || amount > Money.maxMinor) {
-        throw const LoanException(
-          'The monthly instalment must be greater than zero.',
-        );
+      if (months == null) {
+        final amount = installmentMinor ?? 0;
+        if (amount <= 0 || amount > Money.maxMinor) {
+          throw const LoanException(
+            'The monthly instalment must be greater than zero.',
+          );
+        }
+      } else {
+        monthlyAmountForRest(snapshot, months);
       }
       final next = nextDueDate;
       if (next == null) {
@@ -745,19 +756,20 @@ class LoanProvider extends ChangeNotifier {
       schedule = LoanCalculator.buildSchedule(
         loanId: loan.id,
         type: LoanRepaymentType.monthly,
-        totalOwedMinor: loan.totalOwedMinor,
+        principalMinor: loan.principalMinor,
         newId: _uuid.v4,
+        method: loan.interestMethod,
+        interestRateBp: loan.interestRateBp,
         kept: settled,
-        installmentMinor: amount,
+        installmentMinor: months == null ? installmentMinor : null,
+        months: months,
         firstDueDate: next,
         dueDay: day,
       );
-      if (schedule.length > LoanLimits.maxInstallments) {
-        throw const LoanException('Increase the monthly instalment.');
-      }
       await _saveLoan(
         loan.copyWith(
-          installmentMinor: () => amount,
+          installmentMinor: () => _emiOf(schedule, snapshot),
+          interestMinor: _interestOf(schedule),
           dueDay: () => day,
           schedule: schedule,
           updatedAt: _stamp(loan, now),
@@ -775,12 +787,14 @@ class LoanProvider extends ChangeNotifier {
         'The repayment date cannot be before the money was lent.',
       );
     }
+    // The agreed interest stays as it is; only the date moves.
     schedule = LoanCalculator.buildSchedule(
       loanId: loan.id,
       type: LoanRepaymentType.oneTime,
-      totalOwedMinor: loan.totalOwedMinor,
+      principalMinor: loan.principalMinor,
       newId: _uuid.v4,
       dueDate: date,
+      oneTimeInterestMinor: loan.interestMinor,
     );
     await _saveLoan(
       loan.copyWith(
@@ -792,28 +806,35 @@ class LoanProvider extends ChangeNotifier {
     );
   }
 
-  /// The monthly amount that repays what is not yet covered by (partly)
-  /// paid instalments of [snapshot] in [months] instalments. Throws
-  /// [LoanException] for fewer than one month or more than the limit.
+  /// The monthly amount that repays the capital not yet covered by (partly)
+  /// paid instalments of [snapshot] in [months] instalments, with the
+  /// loan's interest method. Throws [LoanException] for fewer than one
+  /// month, more than the limit, or nothing left to schedule.
   int monthlyAmountForRest(LoanSnapshot snapshot, int months) {
     if (months < 1) throw const LoanException('Enter at least 1 month.');
     if (months > LoanLimits.maxInstallments) {
       throw const LoanException('That is more than 50 years.');
     }
+    final loan = snapshot.loan;
     final settled = LoanCalculator.settledInstallments(snapshot);
     final rest =
-        snapshot.loan.totalOwedMinor -
-        settled.fold<int>(0, (s, i) => s + i.expectedMinor);
+        loan.principalMinor -
+        settled.fold<int>(0, (s, i) => s + i.principalMinor);
     if (rest <= 0) {
       throw const LoanException('Nothing is left to schedule.');
     }
-    final amount = (rest + months - 1) ~/ months;
-    if ((rest + amount - 1) ~/ amount != months) {
+    final plan = LoanCalculator.planMonthly(
+      principalMinor: rest,
+      method: loan.interestMethod,
+      rateBp: loan.interestRateBp,
+      months: months,
+    );
+    if (plan.length != months) {
       throw const LoanException(
         'The amount left is too small to spread over that many months.',
       );
     }
-    return amount;
+    return plan.first.principalMinor + plan.first.interestMinor;
   }
 
   /// New schedule for changed terms. Monthly loans keep the instalments
@@ -823,21 +844,32 @@ class LoanProvider extends ChangeNotifier {
   List<LoanInstallment> _rebuild(
     LoanSnapshot snapshot, {
     required LoanRepaymentType type,
-    required int totalOwedMinor,
+    required int principalMinor,
+    required InterestMethod method,
+    required int rateBp,
     int? installmentMinor,
+    int? months,
     DateTime? firstDueDate,
     int? dueDay,
     DateTime? dueDate,
-    required bool continueSeries,
+    required DateTime lentDate,
   }) {
     final loan = snapshot.loan;
     if (type == LoanRepaymentType.oneTime) {
       return LoanCalculator.buildSchedule(
         loanId: loan.id,
         type: type,
-        totalOwedMinor: totalOwedMinor,
+        principalMinor: principalMinor,
         newId: _uuid.v4,
         dueDate: dueDate,
+        oneTimeInterestMinor: dueDate == null
+            ? 0
+            : LoanCalculator.oneTimeInterest(
+                principalMinor,
+                rateBp,
+                lentDate,
+                dueDate,
+              ),
       );
     }
     final settled = loan.isMonthly
@@ -845,7 +877,7 @@ class LoanProvider extends ChangeNotifier {
         : const <LoanInstallment>[];
     var first = firstDueDate!;
     final day = dueDay ?? first.day;
-    if (continueSeries && settled.isNotEmpty) {
+    if (settled.isNotEmpty) {
       // The unpaid rest continues the series after the last instalment
       // that received money.
       var index = 0;
@@ -858,13 +890,25 @@ class LoanProvider extends ChangeNotifier {
       }
       first = LoanCalculator.monthlyDueDate(first, day, index);
     }
+    // A number of months is the whole term: the instalments already kept
+    // count towards it.
+    final rest = months == null ? null : months - settled.length;
+    if (rest != null && rest < 1) {
+      throw LoanException(
+        '${settled.length} instalment(s) have already received money; '
+        'choose more months than that.',
+      );
+    }
     return LoanCalculator.buildSchedule(
       loanId: loan.id,
       type: type,
-      totalOwedMinor: totalOwedMinor,
+      principalMinor: principalMinor,
       newId: _uuid.v4,
+      method: method,
+      interestRateBp: rateBp,
       kept: settled,
       installmentMinor: installmentMinor,
+      months: rest,
       firstDueDate: first,
       dueDay: day,
     );
@@ -890,8 +934,66 @@ class LoanProvider extends ChangeNotifier {
 
   // ---------------------------------------------------------- repayments
 
-  /// Records money the borrower paid back. Partial, early and extra
-  /// payments are all fine, up to the outstanding amount. Works offline.
+  /// How [amountMinor] paid on [date] would be applied to [snapshot]'s
+  /// loan: what goes to the current instalment (interest first), what goes
+  /// straight to the capital, and the revised EMI. Nothing is recorded.
+  RepaymentAllocation previewRepayment(
+    LoanSnapshot snapshot, {
+    required int amountMinor,
+    DateTime? date,
+  }) {
+    final now = _clock();
+    final when = date ?? now;
+    final hypothetical = LoanRepayment(
+      id: '_preview',
+      loanId: snapshot.id,
+      amountMinor: amountMinor <= 0 ? 1 : amountMinor,
+      date: when,
+      createdAt: now,
+      updatedAt: now,
+      syncState: RepaymentSyncState.synced,
+    );
+    return _allocate(snapshot, hypothetical, now);
+  }
+
+  RepaymentAllocation _allocate(
+    LoanSnapshot before,
+    LoanRepayment repayment,
+    DateTime now,
+  ) {
+    final base = _baseLoan(before.id) ?? before.loan;
+    final after = LoanCalculator.snapshot(base, [
+      ...repaymentsOf(before.id),
+      repayment,
+    ], now);
+    return LoanCalculator.allocation(
+      before: before,
+      after: after,
+      amountMinor: repayment.amountMinor,
+      now: now,
+    );
+  }
+
+  Loan? _baseLoan(String id) {
+    for (final l in _loans) {
+      if (l.id == id) return l;
+    }
+    return null;
+  }
+
+  /// The most that can be recorded now: for a monthly loan, what settles
+  /// it (the current instalment plus the capital after it); for a one-time
+  /// loan, what is outstanding.
+  int maxRepaymentMinor(LoanSnapshot snapshot) => snapshot.loan.isMonthly
+      ? snapshot.settlementMinor
+      : snapshot.outstandingMinor;
+
+  /// Records money the borrower paid back. Partial and early payments go to
+  /// the current instalment. For monthly loans, whatever is paid above it
+  /// reduces the capital, and the remaining EMIs are recalculated over the
+  /// remaining months (see `LoanCalculator.snapshot`). How the repayment
+  /// was applied is kept with it ([LoanRepayment.allocation]). Works
+  /// offline.
   Future<LoanRepayment> recordRepayment(
     LoanSnapshot snapshot, {
     required int amountMinor,
@@ -909,10 +1011,14 @@ class LoanProvider extends ChangeNotifier {
     if (snapshot.isCompleted) {
       throw const LoanException('This loan has been repaid in full.');
     }
-    if (amountMinor > snapshot.outstandingMinor) {
+    final max = maxRepaymentMinor(snapshot);
+    if (amountMinor > max) {
       throw LoanException(
-        'The repayment cannot be more than the outstanding '
-        '${_formatter.format(snapshot.outstandingMinor)}.',
+        loan.isMonthly
+            ? 'The repayment cannot be more than the '
+                  '${_formatter.format(max)} that settles the loan.'
+            : 'The repayment cannot be more than the outstanding '
+                  '${_formatter.format(max)}.',
       );
     }
     final day = PeriodUtils.dateOnly(date);
@@ -932,18 +1038,32 @@ class LoanProvider extends ChangeNotifier {
     final when = PeriodUtils.isSameDay(date, now)
         ? now
         : DateTime(date.year, date.month, date.day, 12);
-    final repayment = LoanRepayment(
+    final draft = LoanRepayment(
       id: _uuid.v4(),
       loanId: loan.id,
       amountMinor: amountMinor,
       date: when,
       method: method,
       note: note.trim(),
-      installmentId: installmentId,
+      installmentId: installmentId ?? snapshot.nextDue?.id,
       createdAt: now,
       updatedAt: now,
       userUid: _uid,
       userName: _userName,
+    );
+    final repayment = LoanRepayment(
+      id: draft.id,
+      loanId: draft.loanId,
+      amountMinor: draft.amountMinor,
+      date: draft.date,
+      method: draft.method,
+      note: draft.note,
+      installmentId: draft.installmentId,
+      createdAt: draft.createdAt,
+      updatedAt: draft.updatedAt,
+      userUid: draft.userUid,
+      userName: draft.userName,
+      allocation: _allocate(snapshot, draft, now),
     );
     await _requireRepository().addRepayment(repayment);
     await _afterLocalChange();
@@ -990,6 +1110,7 @@ class LoanProvider extends ChangeNotifier {
       voidedBy: _uid,
       voidReason: reason.trim(),
       syncState: RepaymentSyncState.synced,
+      allocation: repayment.allocation,
     );
     final cloud = _cloud;
     if (cloud != null && _uid != null) {

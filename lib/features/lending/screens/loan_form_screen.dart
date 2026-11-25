@@ -51,6 +51,9 @@ class _LoanFormScreenState extends State<LoanFormScreen> {
   /// amount is calculated, instead of giving the monthly amount.
   bool _byMonths = false;
 
+  /// How interest is worked out (asked only when there is interest).
+  InterestMethod _method = InterestMethod.flat;
+
   bool get _isEditing => widget.snapshot != null;
 
   static final _dateFormat = DateFormat('EEE, d MMM yyyy');
@@ -78,6 +81,7 @@ class _LoanFormScreenState extends State<LoanFormScreen> {
       _notes.text = loan.notes;
       _lentDate = loan.lentDate;
       _type = loan.repaymentType;
+      _method = loan.interestMethod;
       _household = loan.isHousehold;
       if (loan.installmentMinor case final amount?) {
         _installment.text = Money.toInputString(amount);
@@ -147,6 +151,7 @@ class _LoanFormScreenState extends State<LoanFormScreen> {
       final quote = LoanCalculator.quote(
         principalMinor: principal,
         interestRateBp: rate,
+        method: _method,
         type: _type,
         lentDate: _lentDate,
         installmentMinor: installment,
@@ -200,6 +205,7 @@ class _LoanFormScreenState extends State<LoanFormScreen> {
         principalMinor: principal,
         interestRateBp: rate,
         months: months,
+        method: _method,
       );
       final total = principal + q.interestMinor;
       final lastAmount = total - q.installmentMinor * (months - 1);
@@ -251,6 +257,7 @@ class _LoanFormScreenState extends State<LoanFormScreen> {
           lentDate: _lentDate,
           repaymentType: _type,
           interestRateBp: rate,
+          interestMethod: _method,
           installmentMinor: installment,
           firstDueDate: _firstDue,
           dueDay: _dueDay,
@@ -273,6 +280,7 @@ class _LoanFormScreenState extends State<LoanFormScreen> {
           lentDate: _lentDate,
           repaymentType: _type,
           interestRateBp: rate,
+          interestMethod: _method,
           installmentMinor: installment,
           firstDueDate: _firstDue,
           dueDay: _dueDay,
@@ -476,7 +484,7 @@ class _LoanFormScreenState extends State<LoanFormScreen> {
                     labelText: 'Interest rate per year (optional)',
                     hintText: '0',
                     suffixText: '%',
-                    helperText: 'Simple interest on the amount lent',
+                    helperText: 'Per year',
                     prefixIcon: Icon(Icons.percent_rounded),
                   ),
                   validator: (v) {
@@ -487,6 +495,31 @@ class _LoanFormScreenState extends State<LoanFormScreen> {
                     return null;
                   },
                 ),
+                if ((parseRateBp(_rate.text) ?? 0) > 0 &&
+                    _type == LoanRepaymentType.monthly) ...[
+                  const SizedBox(height: Spacing.sm),
+                  SegmentedButton<InterestMethod>(
+                    key: const Key('interestMethodSelector'),
+                    segments: [
+                      for (final m in InterestMethod.values)
+                        ButtonSegment(value: m, label: Text(m.label)),
+                    ],
+                    selected: {_method},
+                    onSelectionChanged: (v) =>
+                        setState(() => _method = v.first),
+                  ),
+                  const SizedBox(height: Spacing.xs),
+                  Text(
+                    _method == InterestMethod.flat
+                        ? 'Flat: interest on the amount lent for the whole '
+                              'term, the same every month.'
+                        : 'Reducing balance: interest each month on what is '
+                              'still owed, so it falls as capital is repaid.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: Spacing.lg),
                 Text('Repayment', style: theme.textTheme.titleSmall),
                 const SizedBox(height: Spacing.sm),

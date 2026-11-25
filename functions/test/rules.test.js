@@ -1131,15 +1131,41 @@ test.describe('firestore.rules', { skip }, () => {
     await assertFails(
       db(OWNER).doc(loan).set(loanDoc('l1', OWNER, { principalMinor: 0, totalOwedMinor: 0 })),
     );
+    // Only known interest methods.
+    await assertFails(
+      db(OWNER).doc(loan).set(loanDoc('l1', OWNER, { interestMethod: 'compound' })),
+    );
     await assertSucceeds(
-      db(OWNER).doc(loan).set(loanDoc('l1', OWNER), { merge: true }),
+      db(OWNER).doc(loan).set(
+        loanDoc('l1', OWNER, {
+          interestMethod: 'reducing',
+          originalInstallmentMinor: 100000,
+          originalTermMonths: 1,
+        }),
+        { merge: true },
+      ),
     );
     await assertSucceeds(db(OWNER).doc(loan).get());
     await assertFails(db(STRANGER).doc(loan).get());
 
-    // A repayment with the matching new total.
+    // A repayment with the matching new total, and how it was applied.
+    const allocation = {
+      installmentNumber: 1,
+      scheduledEmiMinor: 100000,
+      appliedToInstallmentMinor: 30000,
+      extraPrincipalMinor: 0,
+      principalBeforeMinor: 100000,
+      principalAfterMinor: 70000,
+      remainingInstallments: 1,
+      recalculatedAt: 1_705_000_000_000,
+    };
+    await assertFails(
+      repay(db(OWNER), base, 'l1',
+        repaymentDoc('r1', 'l1', OWNER, 30000, { allocation: 'text' }), 30000),
+    );
     await assertSucceeds(
-      repay(db(OWNER), base, 'l1', repaymentDoc('r1', 'l1', OWNER, 30000), 30000),
+      repay(db(OWNER), base, 'l1',
+        repaymentDoc('r1', 'l1', OWNER, 30000, { allocation }), 30000),
     );
     // Wrong total, another user's name, re-using an ID, or more than owed.
     await assertFails(

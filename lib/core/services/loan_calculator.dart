@@ -1,21 +1,35 @@
+import 'dart:math' as math;
+
 import 'package:money_mate/core/utils/date_range.dart';
 import 'package:money_mate/core/utils/money.dart';
 import 'package:money_mate/models/loan_model.dart';
 
-/// The agreed interest of a loan and how many instalments it takes.
+/// The interest of a loan's schedule and how many instalments it takes.
 typedef LoanQuote = ({int interestMinor, int installmentCount});
+
+/// One planned instalment: its principal and interest parts.
+typedef PlannedAmount = ({int principalMinor, int interestMinor});
 
 /// Pure lending arithmetic, free of I/O so it can be unit tested.
 ///
-/// Interest is simple (flat) interest on the amount lent, agreed up front:
+/// **Interest** is worked out with the method chosen for the loan:
 ///
 /// * one-time loans: `principal × rate × days(lent → due) / 365`;
-/// * monthly loans: `principal × rate × months / 12`, where `months` is the
-///   number of instalments needed to repay principal and interest.
+/// * flat monthly loans: `principal × rate × months / 12`, spread evenly;
+/// * reducing-balance monthly loans: each month `outstanding × rate / 12`,
+///   with the EMI from `P × r × (1 + r)^n / ((1 + r)^n − 1)`.
 ///
-/// Every repayment is split between principal and interest in the
-/// proportion `principal : interest` of the total owed, so the principal
-/// and interest received always add up to what was received.
+/// Within an instalment, money goes to its interest first, then to its
+/// principal.
+///
+/// **Extra repayments.** Whatever is paid above the current instalment goes
+/// straight to the capital (principal): the instalment is paid, the capital
+/// drops by the extra, and the remaining instalments — the same number, on
+/// the same dates — are recalculated from the reduced capital with the
+/// loan's interest method. The schedule is derived from the repayments
+/// every time it is read ([snapshot]), so every device arrives at the same
+/// schedule from the same repayment records, and voiding a repayment undoes
+/// its effect.
 class LoanCalculator {
   LoanCalculator._();
 
@@ -34,114 +48,10 @@ class LoanCalculator {
     return DateTime(monthStart.year, monthStart.month, day);
   }
 
-  /// Interest and instalment count for new terms. Throws [LoanException]
-  /// when the terms cannot be repaid (e.g. an instalment that does not even
-  /// cover the monthly interest).
-  static LoanQuote quote({
-    required int principalMinor,
-    required int interestRateBp,
-    required LoanRepaymentType type,
-    required DateTime lentDate,
-    int? installmentMinor,
-    DateTime? dueDate,
-  }) {
-    if (principalMinor <= 0) {
-      throw const LoanException('The amount must be greater than zero.');
-    }
-    if (interestRateBp < 0 || interestRateBp > LoanLimits.maxInterestRateBp) {
+  static void _checkRate(int bp) {
+    if (bp < 0 || bp > LoanLimits.maxInterestRateBp) {
       throw const LoanException('Enter an interest rate from 0% to 100%.');
     }
-    switch (type) {
-      case LoanRepaymentType.oneTime:
-        if (dueDate == null) {
-          throw const LoanException('Choose the expected repayment date.');
-        }
-        final days = PeriodUtils.daysBetween(
-          PeriodUtils.dateOnly(lentDate),
-          PeriodUtils.dateOnly(dueDate),
-        );
-        final interest = interestRateBp == 0 || days <= 0
-            ? 0
-            : _round(
-                BigInt.from(principalMinor) *
-                    BigInt.from(interestRateBp) *
-                    BigInt.from(days),
-                BigInt.from(10000 * 365),
-              );
-        return (interestMinor: interest, installmentCount: 1);
-      case LoanRepaymentType.monthly:
-        final installment = installmentMinor ?? 0;
-        if (installment <= 0) {
-          throw const LoanException(
-            'The monthly instalment must be greater than zero.',
-          );
-        }
-        if (interestRateBp == 0) {
-          final count = (principalMinor + installment - 1) ~/ installment;
-          _checkCount(count);
-          return (interestMinor: 0, installmentCount: count);
-        }
-        // Flat monthly interest; each instalment must cover more than it.
-        final monthlyInterest = principalMinor * interestRateBp / (10000 * 12);
-        if (installment <= monthlyInterest) {
-          throw LoanException(
-            'The monthly instalment must be more than the monthly interest '
-            '(${Money.toInputString(monthlyInterest.ceil())}).',
-          );
-        }
-        final months = (principalMinor / (installment - monthlyInterest))
-            .ceil();
-        _checkCount(months);
-        final interest = _round(
-          BigInt.from(principalMinor) *
-              BigInt.from(interestRateBp) *
-              BigInt.from(months),
-          BigInt.from(10000 * 12),
-        );
-        final total = principalMinor + interest;
-        final count = (total + installment - 1) ~/ installment;
-        _checkCount(count);
-        return (interestMinor: interest, installmentCount: count);
-    }
-  }
-
-  /// Monthly instalment and interest when the borrower repays in [months]
-  /// instalments: interest is `principal × rate × months / 12`, and the
-  /// total is spread over the months (the last instalment may be a little
-  /// smaller). Throws [LoanException] when [months] is out of range or the
-  /// amount is too small to spread over that many months.
-  static ({int installmentMinor, int interestMinor}) quoteForMonths({
-    required int principalMinor,
-    required int interestRateBp,
-    required int months,
-  }) {
-    if (principalMinor <= 0) {
-      throw const LoanException('The amount must be greater than zero.');
-    }
-    if (interestRateBp < 0 || interestRateBp > LoanLimits.maxInterestRateBp) {
-      throw const LoanException('Enter an interest rate from 0% to 100%.');
-    }
-    if (months < 1) {
-      throw const LoanException('Enter at least 1 month.');
-    }
-    _checkCount(months);
-    final interest = interestRateBp == 0
-        ? 0
-        : _round(
-            BigInt.from(principalMinor) *
-                BigInt.from(interestRateBp) *
-                BigInt.from(months),
-            BigInt.from(10000 * 12),
-          );
-    final total = principalMinor + interest;
-    final installment = (total + months - 1) ~/ months;
-    // Rounding up must still leave something for the last month.
-    if ((total + installment - 1) ~/ installment != months) {
-      throw const LoanException(
-        'The amount is too small to spread over that many months.',
-      );
-    }
-    return (installmentMinor: installment, interestMinor: interest);
   }
 
   static void _checkCount(int count) {
@@ -157,33 +67,289 @@ class LoanCalculator {
   static int _round(BigInt a, BigInt b) =>
       ((a * BigInt.two + b) ~/ (b * BigInt.two)).toInt();
 
+  static int _ceilDiv(int a, int b) => (a + b - 1) ~/ b;
+
+  /// Flat interest on [principalMinor] for [months] months.
+  static int flatInterest(int principalMinor, int rateBp, int months) =>
+      rateBp == 0 || months <= 0
+      ? 0
+      : _round(
+          BigInt.from(principalMinor) *
+              BigInt.from(rateBp) *
+              BigInt.from(months),
+          BigInt.from(10000 * 12),
+        );
+
+  /// Monthly instalments that repay [principalMinor] with [method] at
+  /// [rateBp], either over [months] instalments or at [installmentMinor] a
+  /// month. Amounts are whole minor units; the last instalment settles the
+  /// exact rest (so it may be a little smaller). Throws [LoanException]
+  /// when the terms cannot work.
+  static List<PlannedAmount> planMonthly({
+    required int principalMinor,
+    required InterestMethod method,
+    required int rateBp,
+    int? months,
+    int? installmentMinor,
+  }) {
+    if (principalMinor <= 0) {
+      throw const LoanException('The amount must be greater than zero.');
+    }
+    _checkRate(rateBp);
+    if (months != null) {
+      if (months < 1) throw const LoanException('Enter at least 1 month.');
+      _checkCount(months);
+      return rateBp > 0 && method == InterestMethod.reducing
+          ? _reducingOver(principalMinor, rateBp, months)
+          : _flatOver(principalMinor, rateBp, months);
+    }
+    final amount = installmentMinor ?? 0;
+    if (amount <= 0) {
+      throw const LoanException(
+        'The monthly instalment must be greater than zero.',
+      );
+    }
+    if (rateBp == 0) {
+      final count = _ceilDiv(principalMinor, amount);
+      _checkCount(count);
+      return _flatAmounts(principalMinor, 0, amount);
+    }
+    if (method == InterestMethod.reducing) {
+      return _reducingAt(principalMinor, rateBp, amount);
+    }
+    // Flat: the instalment must cover more than the monthly interest.
+    final monthlyInterest = principalMinor * rateBp / (10000 * 12);
+    if (amount <= monthlyInterest) {
+      throw LoanException(
+        'The monthly instalment must be more than the monthly interest '
+        '(${Money.toInputString(monthlyInterest.ceil())}).',
+      );
+    }
+    final monthsNeeded = (principalMinor / (amount - monthlyInterest)).ceil();
+    _checkCount(monthsNeeded);
+    final interest = flatInterest(principalMinor, rateBp, monthsNeeded);
+    final plan = _flatAmounts(principalMinor, interest, amount);
+    _checkCount(plan.length);
+    return plan;
+  }
+
+  /// Flat (or interest-free) over [months]: the total spread evenly, the
+  /// EMI rounded up and the last instalment settling the rest.
+  static List<PlannedAmount> _flatOver(int principal, int rateBp, int months) {
+    final interest = flatInterest(principal, rateBp, months);
+    final total = principal + interest;
+    final emi = _ceilDiv(total, months);
+    return _flatAmounts(principal, interest, emi);
+  }
+
+  /// [principal] + [interest] in instalments of [emi] (the last one
+  /// smaller), with the interest spread in proportion to each amount.
+  static List<PlannedAmount> _flatAmounts(
+    int principal,
+    int interest,
+    int emi,
+  ) {
+    final total = principal + interest;
+    final result = <PlannedAmount>[];
+    var paid = 0;
+    var interestSoFar = 0;
+    while (paid < total) {
+      final amount = total - paid < emi ? total - paid : emi;
+      paid += amount;
+      final interestCumulative = total == 0
+          ? 0
+          : _round(
+              BigInt.from(interest) * BigInt.from(paid),
+              BigInt.from(total),
+            );
+      final part = interestCumulative - interestSoFar;
+      interestSoFar = interestCumulative;
+      result.add((principalMinor: amount - part, interestMinor: part));
+    }
+    return result;
+  }
+
+  /// Reducing balance over [months]: the EMI from the standard formula,
+  /// rounded up to a whole minor unit; the last instalment settles the
+  /// exact rest.
+  static List<PlannedAmount> _reducingOver(
+    int principal,
+    int rateBp,
+    int months,
+  ) {
+    final r = rateBp / (10000 * 12);
+    final growth = math.pow(1 + r, months).toDouble();
+    final emi = (principal * r * growth / (growth - 1)).ceil();
+    return _amortize(principal, rateBp, emi, maxCount: months);
+  }
+
+  /// Reducing balance at a fixed [emi] until the capital is repaid.
+  static List<PlannedAmount> _reducingAt(int principal, int rateBp, int emi) {
+    final firstInterest = _monthlyInterest(principal, rateBp);
+    if (emi <= firstInterest) {
+      throw LoanException(
+        'The monthly instalment must be more than the monthly interest '
+        '(${Money.toInputString(firstInterest)}).',
+      );
+    }
+    return _amortize(principal, rateBp, emi);
+  }
+
+  static int _monthlyInterest(int balance, int rateBp) => _round(
+    BigInt.from(balance) * BigInt.from(rateBp),
+    BigInt.from(10000 * 12),
+  );
+
+  static List<PlannedAmount> _amortize(
+    int principal,
+    int rateBp,
+    int emi, {
+    int? maxCount,
+  }) {
+    final result = <PlannedAmount>[];
+    var balance = principal;
+    while (balance > 0) {
+      final interest = _monthlyInterest(balance, rateBp);
+      final last =
+          balance + interest <= emi ||
+          (maxCount != null && result.length == maxCount - 1);
+      final principalPart = last ? balance : emi - interest;
+      result.add((principalMinor: principalPart, interestMinor: interest));
+      balance -= principalPart;
+      _checkCount(result.length);
+    }
+    return result;
+  }
+
+  /// Interest and instalment count for new terms. Throws [LoanException]
+  /// when the terms cannot be repaid (e.g. an instalment that does not even
+  /// cover the monthly interest).
+  static LoanQuote quote({
+    required int principalMinor,
+    required int interestRateBp,
+    required LoanRepaymentType type,
+    required DateTime lentDate,
+    InterestMethod method = InterestMethod.flat,
+    int? installmentMinor,
+    int? months,
+    DateTime? dueDate,
+  }) {
+    if (principalMinor <= 0) {
+      throw const LoanException('The amount must be greater than zero.');
+    }
+    _checkRate(interestRateBp);
+    switch (type) {
+      case LoanRepaymentType.oneTime:
+        if (dueDate == null) {
+          throw const LoanException('Choose the expected repayment date.');
+        }
+        return (
+          interestMinor: oneTimeInterest(
+            principalMinor,
+            interestRateBp,
+            lentDate,
+            dueDate,
+          ),
+          installmentCount: 1,
+        );
+      case LoanRepaymentType.monthly:
+        final plan = planMonthly(
+          principalMinor: principalMinor,
+          method: method,
+          rateBp: interestRateBp,
+          months: months,
+          installmentMinor: installmentMinor,
+        );
+        return (
+          interestMinor: plan.fold(0, (s, p) => s + p.interestMinor),
+          installmentCount: plan.length,
+        );
+    }
+  }
+
+  /// Simple interest from [lentDate] to [dueDate].
+  static int oneTimeInterest(
+    int principalMinor,
+    int rateBp,
+    DateTime lentDate,
+    DateTime dueDate,
+  ) {
+    final days = PeriodUtils.daysBetween(
+      PeriodUtils.dateOnly(lentDate),
+      PeriodUtils.dateOnly(dueDate),
+    );
+    return rateBp == 0 || days <= 0
+        ? 0
+        : _round(
+            BigInt.from(principalMinor) *
+                BigInt.from(rateBp) *
+                BigInt.from(days),
+            BigInt.from(10000 * 365),
+          );
+  }
+
+  /// Monthly instalment and interest when the borrower repays in [months]
+  /// instalments with [method]. Throws [LoanException] when [months] is out
+  /// of range or the amount is too small to spread over that many months.
+  static ({int installmentMinor, int interestMinor}) quoteForMonths({
+    required int principalMinor,
+    required int interestRateBp,
+    required int months,
+    InterestMethod method = InterestMethod.flat,
+  }) {
+    final plan = planMonthly(
+      principalMinor: principalMinor,
+      method: method,
+      rateBp: interestRateBp,
+      months: months,
+    );
+    if (plan.length != months) {
+      throw const LoanException(
+        'The amount is too small to spread over that many months.',
+      );
+    }
+    final first = plan.first;
+    return (
+      installmentMinor: first.principalMinor + first.interestMinor,
+      interestMinor: plan.fold(0, (s, p) => s + p.interestMinor),
+    );
+  }
+
   /// Builds the schedule of a loan: [kept] instalments first (those that
   /// already received money; they never change), then new instalments for
-  /// whatever of [totalOwedMinor] they do not cover.
+  /// the capital they do not cover.
   ///
-  /// Monthly loans get instalments of [installmentMinor] (the last one
-  /// smaller) from [firstDueDate] on [dueDay]; one-time loans one
-  /// instalment due on [dueDate]. No instalment is created beyond what is
-  /// owed. Throws [LoanException] when [kept] already expects more than
-  /// [totalOwedMinor].
+  /// Monthly loans repay that capital with [method] at [interestRateBp],
+  /// over [months] instalments or at [installmentMinor] a month, from
+  /// [firstDueDate] on [dueDay]. One-time loans get one instalment due on
+  /// [dueDate] for the capital plus [oneTimeInterestMinor]. No instalment is
+  /// created beyond what is owed. Throws [LoanException] when [kept]
+  /// already covers more capital than [principalMinor].
   static List<LoanInstallment> buildSchedule({
     required String loanId,
     required LoanRepaymentType type,
-    required int totalOwedMinor,
+    required int principalMinor,
     required String Function() newId,
+    InterestMethod method = InterestMethod.flat,
+    int interestRateBp = 0,
     List<LoanInstallment> kept = const [],
     int? installmentMinor,
+    int? months,
     DateTime? firstDueDate,
     int? dueDay,
     DateTime? dueDate,
+    int oneTimeInterestMinor = 0,
   }) {
     final sortedKept = [...kept]..sort((a, b) => a.number.compareTo(b.number));
-    final keptTotal = sortedKept.fold<int>(0, (s, i) => s + i.expectedMinor);
-    var remaining = totalOwedMinor - keptTotal;
+    final keptPrincipal = sortedKept.fold<int>(
+      0,
+      (s, i) => s + i.principalMinor,
+    );
+    final remaining = principalMinor - keptPrincipal;
     if (remaining < 0) {
       throw const LoanException(
-        'The total owed cannot be less than the instalments that have '
-        'already been (partly) paid.',
+        'The amount lent cannot be less than what the instalments that have '
+        'already been (partly) paid cover.',
       );
     }
     final result = [...sortedKept];
@@ -200,51 +366,61 @@ class LoanCalculator {
             loanId: loanId,
             number: number,
             dueDate: PeriodUtils.dateOnly(dueDate),
-            expectedMinor: remaining,
+            expectedMinor: remaining + oneTimeInterestMinor,
+            interestMinor: oneTimeInterestMinor,
           ),
         );
       case LoanRepaymentType.monthly:
-        final amount = installmentMinor ?? 0;
         final first = firstDueDate;
-        if (amount <= 0 || first == null) {
-          throw const LoanException(
-            'Enter the monthly instalment and the first repayment date.',
-          );
+        if (first == null) {
+          throw const LoanException('Choose the first repayment date.');
         }
+        final plan = planMonthly(
+          principalMinor: remaining,
+          method: method,
+          rateBp: interestRateBp,
+          months: months,
+          installmentMinor: installmentMinor,
+        );
         final day = dueDay ?? first.day;
-        var index = 0;
-        while (remaining > 0) {
-          if (result.length >= LoanLimits.maxInstallments) {
-            _checkCount(result.length + 1);
-          }
-          final expected = remaining < amount ? remaining : amount;
+        for (var index = 0; index < plan.length; index++) {
+          final p = plan[index];
           result.add(
             LoanInstallment(
               id: newId(),
               loanId: loanId,
               number: number++,
-              dueDate: monthlyDueDate(first, day, index++),
-              expectedMinor: expected,
+              dueDate: monthlyDueDate(first, day, index),
+              expectedMinor: p.principalMinor + p.interestMinor,
+              interestMinor: p.interestMinor,
             ),
           );
-          remaining -= expected;
         }
+        _checkCount(result.length);
     }
     return result;
   }
 
   /// Instalments of [snapshot] that have received money: they are kept as
-  /// they are when the rest of the schedule is recalculated.
+  /// they are (extra capital included) when the rest of the schedule is
+  /// recalculated.
   static List<LoanInstallment> settledInstallments(LoanSnapshot snapshot) => [
     for (final i in snapshot.installments)
-      if (i.receivedMinor > 0) i.installment,
+      if (i.receivedMinor > 0)
+        i.installment.copyWith(interestMinor: i.interestMinor),
   ];
 
   // ------------------------------------------------------------ snapshot
 
-  /// [loan] with its [repayments] applied at [now]: amounts received go to
-  /// the oldest instalment first, then to later ones (early and extra
-  /// payments simply reduce the next instalments).
+  /// [loan] with its [repayments] applied at [now].
+  ///
+  /// Repayments are applied in date order to the first instalment that is
+  /// not fully paid. For monthly loans, whatever a repayment brings above
+  /// that instalment reduces the capital: it is added to the instalment as
+  /// extra principal and the later instalments are recalculated from the
+  /// reduced capital over the same number of months (keeping their IDs and
+  /// due dates, so reminders follow). One-time loans have a single
+  /// instalment that takes every repayment.
   static LoanSnapshot snapshot(
     Loan loan,
     Iterable<LoanRepayment> repayments,
@@ -256,64 +432,209 @@ class LoanCalculator {
             final byDate = a.date.compareTo(b.date);
             return byDate != 0 ? byDate : a.createdAt.compareTo(b.createdAt);
           });
-    final received = counted.fold<int>(0, (s, r) => s + r.amountMinor);
-    final withReceived = loan.copyWith(receivedMinor: received);
     final today = PeriodUtils.dateOnly(now);
+    final schedule = _withInterestSplit(loan);
 
-    final pool = [for (final r in counted) (id: r.id, left: r.amountMinor)];
-    var head = 0;
+    final expected = [for (final i in schedule) i.expectedMinor];
+    final interest = [for (final i in schedule) i.interestMinor ?? 0];
+    final extra = List<int>.filled(schedule.length, 0);
+    final received = List<int>.filled(schedule.length, 0);
+    final ids = List.generate(schedule.length, (_) => <String>[]);
+    var count = schedule.length;
+    var index = 0;
+
+    for (final r in counted) {
+      var left = r.amountMinor;
+      while (left > 0 && index < count) {
+        final need = expected[index] - received[index];
+        final take = left < need ? left : need;
+        if (take > 0) {
+          received[index] += take;
+          ids[index].add(r.id);
+          left -= take;
+        }
+        if (received[index] < expected[index]) break;
+        if (left > 0 && loan.isMonthly) {
+          // Above the instalment: straight off the capital.
+          var principalAfter = loan.principalMinor;
+          for (var k = 0; k <= index; k++) {
+            principalAfter -= expected[k] - interest[k];
+          }
+          final toCapital = left < principalAfter ? left : principalAfter;
+          if (toCapital > 0) {
+            expected[index] += toCapital;
+            received[index] += toCapital;
+            extra[index] += toCapital;
+            left -= toCapital;
+            principalAfter -= toCapital;
+            count = _recalculateTail(
+              loan,
+              index,
+              count,
+              principalAfter,
+              expected,
+              interest,
+            );
+          }
+          // Anything beyond the capital is not owed and does not count.
+          left = 0;
+        }
+        index++;
+      }
+    }
+
     final views = <InstallmentView>[];
     var overdue = 0;
-    final installments = [...loan.schedule]
-      ..sort((a, b) => a.number.compareTo(b.number));
-    for (final inst in installments) {
-      var need = inst.expectedMinor;
-      final ids = <String>[];
-      while (need > 0 && head < pool.length) {
-        final take = pool[head].left < need ? pool[head].left : need;
-        ids.add(pool[head].id);
-        need -= take;
-        pool[head] = (id: pool[head].id, left: pool[head].left - take);
-        if (pool[head].left == 0) head++;
-      }
-      final got = inst.expectedMinor - need;
+    var overduePrincipal = 0;
+    var totalInterest = 0;
+    var interestPaid = 0;
+    var receivedTotal = 0;
+    final derived = <LoanInstallment>[];
+    for (var k = 0; k < count; k++) {
+      final inst = schedule[k].copyWith(
+        expectedMinor: expected[k],
+        interestMinor: interest[k],
+      );
+      derived.add(inst);
       final status = statusOf(
         dueDate: inst.dueDate,
-        expectedMinor: inst.expectedMinor,
-        receivedMinor: got,
+        expectedMinor: expected[k],
+        receivedMinor: received[k],
         today: today,
       );
-      if (status == InstallmentStatus.overdue) overdue += need;
-      views.add(
-        InstallmentView(
-          installment: inst,
-          receivedMinor: got,
-          status: status,
-          repaymentIds: List.unmodifiable(ids),
-        ),
+      final view = InstallmentView(
+        installment: inst,
+        receivedMinor: received[k],
+        status: status,
+        repaymentIds: List.unmodifiable(ids[k]),
+        interestMinor: interest[k],
+        extraPrincipalMinor: extra[k],
       );
+      if (status == InstallmentStatus.overdue) {
+        overdue += view.remainingMinor;
+        overduePrincipal += view.principalMinor - view.principalPaidMinor;
+      }
+      totalInterest += interest[k];
+      interestPaid += view.interestPaidMinor;
+      receivedTotal += received[k];
+      views.add(view);
     }
+    // Repayments recorded beyond the schedule (rare: e.g. a backdated
+    // repayment after a refused one) still count as received.
+    final allReceived = counted.fold<int>(0, (s, r) => s + r.amountMinor);
+    final derivedLoan = loan.copyWith(
+      receivedMinor: allReceived < receivedTotal ? receivedTotal : allReceived,
+      interestMinor: totalInterest,
+      schedule: List.unmodifiable(derived),
+    );
+    final principalPaid = receivedTotal - interestPaid;
+
+    InstallmentView? current;
+    var principalAfterCurrent = 0;
+    for (final v in views) {
+      if (current != null) {
+        principalAfterCurrent += v.principalMinor - v.principalPaidMinor;
+      } else if (!v.isPaid) {
+        current = v;
+      }
+    }
+    final settlement = current == null
+        ? 0
+        : (loan.isMonthly
+              ? current.remainingMinor + principalAfterCurrent
+              : current.remainingMinor);
+
     final LoanStatus status;
-    if (withReceived.isFullyRepaid) {
+    if (receivedTotal >= derivedLoan.totalOwedMinor && current == null) {
       status = LoanStatus.completed;
     } else if (overdue > 0) {
       status = LoanStatus.overdue;
     } else {
       status = LoanStatus.active;
     }
-    final principalReceived = principalPart(
-      received,
-      loan.principalMinor,
-      loan.totalOwedMinor,
-    );
     return LoanSnapshot(
-      loan: withReceived,
+      loan: derivedLoan.copyWith(
+        installmentMinor: () =>
+            loan.isMonthly ? _currentEmi(views) ?? loan.installmentMinor : null,
+      ),
       installments: List.unmodifiable(views),
       status: status,
-      principalReceivedMinor: principalReceived,
-      interestReceivedMinor: received - principalReceived,
+      principalReceivedMinor: principalPaid,
+      interestReceivedMinor: interestPaid,
       overdueMinor: status == LoanStatus.completed ? 0 : overdue,
+      overduePrincipalMinor: status == LoanStatus.completed
+          ? 0
+          : overduePrincipal,
+      settlementMinor: settlement,
     );
+  }
+
+  /// The regular EMI now asked for: the first unpaid instalment with
+  /// nothing received yet (otherwise the partly paid current one).
+  static int? _currentEmi(List<InstallmentView> views) {
+    InstallmentView? partial;
+    for (final v in views) {
+      if (v.isPaid) continue;
+      if (v.receivedMinor == 0) return v.scheduledMinor;
+      partial ??= v;
+    }
+    return partial?.scheduledMinor;
+  }
+
+  /// Recalculates the instalments after [index] from [principal] over the
+  /// same number of months, keeping their IDs and due dates. Returns the
+  /// new instalment count (smaller only when the capital is gone, or too
+  /// small to spread).
+  static int _recalculateTail(
+    Loan loan,
+    int index,
+    int count,
+    int principal,
+    List<int> expected,
+    List<int> interest,
+  ) {
+    final months = count - index - 1;
+    if (principal <= 0 || months <= 0) return index + 1;
+    final plan = planMonthly(
+      principalMinor: principal,
+      method: loan.interestMethod,
+      rateBp: loan.interestRateBp,
+      months: months,
+    );
+    for (var k = 0; k < plan.length; k++) {
+      expected[index + 1 + k] = plan[k].principalMinor + plan[k].interestMinor;
+      interest[index + 1 + k] = plan[k].interestMinor;
+    }
+    return index + 1 + plan.length;
+  }
+
+  /// The schedule with every instalment's interest part known. Older
+  /// records without it get the loan's interest in proportion to their
+  /// amounts.
+  static List<LoanInstallment> _withInterestSplit(Loan loan) {
+    final sorted = [...loan.schedule]
+      ..sort((a, b) => a.number.compareTo(b.number));
+    if (sorted.every((i) => i.interestMinor != null)) return sorted;
+    final total = sorted.fold<int>(0, (s, i) => s + i.expectedMinor);
+    var cumulative = 0;
+    var interestSoFar = 0;
+    return [
+      for (final i in sorted)
+        () {
+          cumulative += i.expectedMinor;
+          final interestCumulative = total == 0
+              ? 0
+              : _round(
+                  BigInt.from(loan.interestMinor) * BigInt.from(cumulative),
+                  BigInt.from(total),
+                );
+          final part = interestCumulative - interestSoFar;
+          interestSoFar = interestCumulative;
+          return i.copyWith(
+            interestMinor: part.clamp(0, i.expectedMinor).toInt(),
+          );
+        }(),
+    ];
   }
 
   /// Status of one instalment at [today] (a date without time).
@@ -333,8 +654,62 @@ class LoanCalculator {
     return InstallmentStatus.upcoming;
   }
 
+  /// How [amountMinor] paid on [date] would be applied to the loan of
+  /// [before] (repayments so far) and what the loan looks like after it
+  /// ([after], with the repayment). Used to show and record the treatment.
+  static RepaymentAllocation allocation({
+    required LoanSnapshot before,
+    required LoanSnapshot after,
+    required int amountMinor,
+    required DateTime now,
+  }) {
+    InstallmentView? current;
+    var currentIndex = -1;
+    for (var k = 0; k < before.installments.length; k++) {
+      if (!before.installments[k].isPaid) {
+        current = before.installments[k];
+        currentIndex = k;
+        break;
+      }
+    }
+    final remainingCurrent = current?.remainingMinor ?? 0;
+    final applied = amountMinor < remainingCurrent
+        ? amountMinor
+        : remainingCurrent;
+    final interestLeft = current == null
+        ? 0
+        : current.interestMinor - current.interestPaidMinor;
+    final interestPortion = applied < interestLeft ? applied : interestLeft;
+    // Capital repaid beyond the instalment's own principal part.
+    final principalNow =
+        after.principalReceivedMinor - before.principalReceivedMinor;
+    final extraRaw = principalNow - (applied - interestPortion);
+    final extra = before.loan.isMonthly && extraRaw > 0 ? extraRaw : 0;
+    InstallmentView? next(LoanSnapshot s) =>
+        currentIndex >= 0 && currentIndex + 1 < s.installments.length
+        ? s.installments[currentIndex + 1]
+        : null;
+    final nextBefore = next(before);
+    final nextAfter = next(after);
+    return RepaymentAllocation(
+      installmentNumber: current?.number,
+      scheduledEmiMinor: current?.scheduledMinor ?? 0,
+      appliedToInstallmentMinor: applied,
+      interestPortionMinor: interestPortion,
+      principalPortionMinor: applied - interestPortion,
+      extraPrincipalMinor: extra,
+      principalBeforeMinor: before.outstandingPrincipalMinor,
+      principalAfterMinor: after.outstandingPrincipalMinor,
+      previousEmiMinor: nextBefore?.scheduledMinor,
+      revisedEmiMinor: nextAfter?.scheduledMinor,
+      remainingInstallments: after.remainingInstallments,
+      recalculatedAt: now,
+      effectiveFrom: extra > 0 ? nextAfter?.dueDate : null,
+    );
+  }
+
   /// The principal part of [amountMinor] received on a loan of
-  /// [principalMinor] that owes [totalOwedMinor] in total.
+  /// [principalMinor] that owes [totalOwedMinor] in total, in proportion.
   static int principalPart(
     int amountMinor,
     int principalMinor,
@@ -368,14 +743,10 @@ class LoanCalculator {
       received += loan.receivedMinor;
       principalReceived += s.principalReceivedMinor;
       interestReceived += s.interestReceivedMinor;
-      outstanding += loan.outstandingMinor;
+      outstanding += s.outstandingMinor;
       outstandingPrincipal += s.outstandingPrincipalMinor;
       overdue += s.overdueMinor;
-      overduePrincipal += principalPart(
-        s.overdueMinor,
-        loan.principalMinor,
-        loan.totalOwedMinor,
-      );
+      overduePrincipal += s.overduePrincipalMinor;
       switch (s.status) {
         case LoanStatus.completed:
           completed++;

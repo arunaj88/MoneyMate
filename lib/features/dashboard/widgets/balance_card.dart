@@ -14,8 +14,6 @@ class BalanceCard extends StatelessWidget {
     this.title = 'Total balance',
     this.savedMinor,
     this.onSavingsTap,
-    this.lentMinor,
-    this.onLentTap,
   });
 
   /// Label above the balance (e.g. "Household balance").
@@ -29,11 +27,6 @@ class BalanceCard extends StatelessWidget {
   /// Money held in savings goals, shown under the balance when not null.
   final int? savedMinor;
   final VoidCallback? onSavingsTap;
-
-  /// Principal lent and not yet repaid, shown under the balance when not
-  /// null.
-  final int? lentMinor;
-  final VoidCallback? onLentTap;
 
   @override
   Widget build(BuildContext context) {
@@ -112,29 +105,51 @@ class BalanceCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (savedMinor != null || lentMinor != null) ...[
+                if (savedMinor != null) ...[
                   const SizedBox(height: Spacing.sm),
-                  Wrap(
-                    spacing: Spacing.sm,
-                    runSpacing: Spacing.xs,
-                    children: [
-                      if (savedMinor != null)
-                        _BalanceChip(
-                          key: const Key('balanceSavingsChip'),
-                          textKey: const Key('balanceSavedText'),
-                          icon: Icons.savings_outlined,
-                          text: 'In savings: ${formatter.format(savedMinor!)}',
-                          onTap: onSavingsTap,
+                  Material(
+                    color: Colors.white.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(20),
+                    child: InkWell(
+                      key: const Key('balanceSavingsChip'),
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: onSavingsTap,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
                         ),
-                      if (lentMinor != null)
-                        _BalanceChip(
-                          key: const Key('balanceLentChip'),
-                          textKey: const Key('balanceLentText'),
-                          icon: Icons.handshake_outlined,
-                          text: 'Lent out: ${formatter.format(lentMinor!)}',
-                          onTap: onLentTap,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.savings_outlined,
+                              size: 16,
+                              color: onCard,
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                'In savings: ${formatter.format(savedMinor!)}',
+                                key: const Key('balanceSavedText'),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: onCard,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            if (onSavingsTap != null)
+                              const Icon(
+                                Icons.chevron_right_rounded,
+                                size: 16,
+                                color: onCard,
+                              ),
+                          ],
                         ),
-                    ],
+                      ),
+                    ),
                   ),
                 ],
                 const SizedBox(height: Spacing.xl),
@@ -166,63 +181,6 @@ class BalanceCard extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// A tappable figure under the balance (savings, money lent).
-class _BalanceChip extends StatelessWidget {
-  const _BalanceChip({
-    super.key,
-    required this.textKey,
-    required this.icon,
-    required this.text,
-    this.onTap,
-  });
-
-  final Key textKey;
-  final IconData icon;
-  final String text;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    const onCard = Colors.white;
-    return Material(
-      color: Colors.white.withValues(alpha: 0.16),
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 16, color: onCard),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  text,
-                  key: textKey,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: onCard,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              if (onTap != null)
-                const Icon(
-                  Icons.chevron_right_rounded,
-                  size: 16,
-                  color: onCard,
-                ),
-            ],
-          ),
-        ),
       ),
     );
   }

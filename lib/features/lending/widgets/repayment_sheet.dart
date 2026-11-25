@@ -36,11 +36,13 @@ class _RepaymentSheetState extends State<RepaymentSheet> {
   void initState() {
     super.initState();
     final snapshot = context.read<LoanProvider>().snapshotById(widget.loanId);
-    final installment = _installment(snapshot) ?? snapshot?.nextDue;
+    // Repayments always go to the first unpaid instalment.
+    final installment = snapshot?.nextDue ?? _installment(snapshot);
     final suggested = installment?.remainingMinor ?? snapshot?.outstandingMinor;
     if (suggested != null && suggested > 0) {
       _amount.text = Money.toInputString(suggested);
     }
+    _amount.addListener(() => setState(() {}));
   }
 
   InstallmentView? _installment(LoanSnapshot? snapshot) {
@@ -82,7 +84,8 @@ class _RepaymentSheetState extends State<RepaymentSheet> {
         installmentId: widget.installmentId ?? snapshot.nextDue?.id,
       );
       if (!mounted) return;
-      final completed = amount >= snapshot.outstandingMinor;
+      final completed =
+          amount >= context.read<LoanProvider>().maxRepaymentMinor(snapshot);
       Navigator.of(context).pop(true);
       showAppSnackBar(
         context,
@@ -119,8 +122,16 @@ class _RepaymentSheetState extends State<RepaymentSheet> {
         child: Text('This lending record no longer exists.'),
       );
     }
+    final loans = context.read<LoanProvider>();
     final outstanding = snapshot.outstandingMinor;
-    final installment = _installment(snapshot) ?? snapshot.nextDue;
+    final max = loans.maxRepaymentMinor(snapshot);
+    final installment = snapshot.nextDue ?? _installment(snapshot);
+    final entered = Money.parseToMinor(_amount.text) ?? 0;
+    final showsExtra =
+        snapshot.loan.isMonthly &&
+        installment != null &&
+        entered > installment.remainingMinor &&
+        entered <= max;
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
     return Padding(
       padding: EdgeInsets.fromLTRB(
@@ -166,8 +177,8 @@ class _RepaymentSheetState extends State<RepaymentSheet> {
                   final base = validateAmount(v);
                   if (base != null) return base;
                   final minor = Money.parseToMinor(v ?? '')!;
-                  if (minor > outstanding) {
-                    return 'No more than ${formatter.format(outstanding)}';
+                  if (minor > max) {
+                    return 'No more than ${formatter.format(max)}';
                   }
                   return null;
                 },
@@ -176,8 +187,7 @@ class _RepaymentSheetState extends State<RepaymentSheet> {
               Wrap(
                 spacing: Spacing.sm,
                 children: [
-                  if (installment != null &&
-                      installment.remainingMinor < outstanding)
+                  if (installment != null && installment.remainingMinor < max)
                     ActionChip(
                       key: const Key('repaymentInstallmentChip'),
                       label: Text(
@@ -190,12 +200,27 @@ class _RepaymentSheetState extends State<RepaymentSheet> {
                     ),
                   ActionChip(
                     key: const Key('repaymentFullChip'),
-                    label: Text('Everything: ${formatter.format(outstanding)}'),
-                    onPressed: () =>
-                        _amount.text = Money.toInputString(outstanding),
+                    label: Text(
+                      max < outstanding
+                          ? 'Settle the loan: ${formatter.format(max)}'
+                          : 'Everything: ${formatter.format(max)}',
+                    ),
+                    onPressed: () => _amount.text = Money.toInputString(max),
                   ),
                 ],
               ),
+              if (showsExtra) ...[
+                const SizedBox(height: Spacing.md),
+                _ExtraPaymentPanel(
+                  allocation: loans.previewRepayment(
+                    snapshot,
+                    amountMinor: entered,
+                    date: _date,
+                  ),
+                  amountMinor: entered,
+                  formatter: formatter,
+                ),
+              ],
               const SizedBox(height: Spacing.md),
               ListTile(
                 key: const Key('repaymentDateField'),
@@ -246,6 +271,108 @@ class _RepaymentSheetState extends State<RepaymentSheet> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// What happens to a repayment above the EMI: the extra reduces the
+/// capital and the remaining EMIs are recalculated.
+class _ExtraPaymentPanel extends StatelessWidget {
+  const _ExtraPaymentPanel({
+    required this.allocation,
+    required this.amountMinor,
+    required this.formatter,
+  });
+
+  final RepaymentAllocation allocation;
+  final int amountMinor;
+  final CurrencyFormatter formatter;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final a = allocation;
+    final color = theme.colorScheme.primary;
+    final settled = a.remainingInstallments == 0;
+    Widget row(String label, String value, {Key? key, bool strong = false}) =>
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: Text(label, style: theme.textTheme.bodySmall)),
+              const SizedBox(width: Spacing.sm),
+              Flexible(
+                flex: 2,
+                child: Text(
+                  value,
+                  key: key,
+                  textAlign: TextAlign.end,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: strong ? FontWeight.w800 : FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+    final previous = a.previousEmiMinor;
+    final revised = a.revisedEmiMinor;
+    return Container(
+      key: const Key('extraPaymentPanel'),
+      padding: const EdgeInsets.all(Spacing.md),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(Spacing.radiusSm),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            settled
+                ? 'This settles the loan'
+                : 'The extra reduces the capital and lowers the remaining '
+                      'EMIs',
+            style: theme.textTheme.titleSmall?.copyWith(color: color),
+          ),
+          const SizedBox(height: Spacing.sm),
+          row(
+            'Scheduled EMI'
+            '${a.installmentNumber == null ? '' : ' (no. ${a.installmentNumber})'}',
+            formatter.format(a.scheduledEmiMinor),
+          ),
+          row('Amount received', formatter.format(amountMinor)),
+          row(
+            'Extra applied to capital',
+            formatter.format(a.extraPrincipalMinor),
+            key: const Key('extraToCapitalText'),
+            strong: true,
+          ),
+          row(
+            'Capital before → after',
+            '${formatter.format(a.principalBeforeMinor)} → '
+                '${formatter.format(a.principalAfterMinor)}',
+          ),
+          if (previous != null || revised != null)
+            row(
+              'EMI before → revised',
+              '${previous == null ? '–' : formatter.format(previous)} → '
+                  '${revised == null ? '–' : formatter.format(revised)}',
+              key: const Key('revisedEmiText'),
+              strong: true,
+            ),
+          row(
+            'Remaining period',
+            '${a.remainingInstallments} month'
+                '${a.remainingInstallments == 1 ? '' : 's'}',
+          ),
+          if (a.effectiveFrom != null)
+            row(
+              'New EMI from',
+              DateFormat('d MMM yyyy').format(a.effectiveFrom!),
+            ),
+        ],
       ),
     );
   }

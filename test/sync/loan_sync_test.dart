@@ -408,6 +408,48 @@ void main() {
     },
   );
 
+  test('an offline extra payment revises the EMI on every device', () async {
+    final a = await device('a', householdId: hid);
+    final b = await device('b', householdId: hid);
+    final loan = await lend(a, household: true);
+    await a.syncNow();
+    await b.syncNow();
+
+    loanCloud.offline = true;
+    cloud.offline = true;
+    final r = await a.provider.recordRepayment(
+      a.only(),
+      amountMinor: 150000,
+      date: DateTime(2026, 11, 18),
+    );
+    // Revised on this phone straight away, offline.
+    expect(a.only().currentEmiMinor, 95455);
+    expect(a.only().outstandingPrincipalMinor, 1050000);
+    loanCloud.offline = false;
+    cloud.offline = false;
+    await a.syncNow();
+    await a.syncNow();
+    expect(loanCloud.repaymentWrites, 1);
+    final stored = loanCloud.repaymentDoc(
+      CloudPartition.household('a', hid),
+      r.id,
+    )!;
+    expect((stored['allocation']! as Map)['extraPrincipalMinor'], 50000);
+
+    // The other member's phone derives the same schedule from the same
+    // repayment; the loan document itself was not rewritten.
+    await b.syncNow();
+    final seen = b.only();
+    expect(seen.currentEmiMinor, 95455);
+    expect(seen.outstandingPrincipalMinor, 1050000);
+    expect(
+      [for (final i in seen.installments) i.expectedMinor],
+      [for (final i in a.only().installments) i.expectedMinor],
+    );
+    expect(b.provider.repaymentById(r.id)!.allocation!.revisedEmiMinor, 95455);
+    expect(loan.loan.schedule, hasLength(12));
+  });
+
   test('a voided repayment is voided on every device', () async {
     final a = await device('a', householdId: hid);
     final b = await device('b', householdId: hid);

@@ -223,7 +223,38 @@ class AppDatabase {
     5: _migrateToV5,
     6: _migrateToV6,
     7: _migrateToV7,
+    8: _migrateToV8,
   };
+
+  /// v8: extra repayments reduce the capital and revise the EMI.
+  ///
+  /// * Loans get their interest method ('flat' for every existing loan, so
+  ///   nothing changes for them) and the EMI and term first agreed.
+  /// * Instalments get their interest part (null for existing ones, which
+  ///   are split in proportion when read).
+  /// * Repayments keep how they were applied (JSON), for the record.
+  static Future<void> _migrateToV8(Database db) async {
+    final batch = db.batch();
+    batch.execute(
+      'ALTER TABLE ${Tables.loans} ADD COLUMN interest_method TEXT NOT NULL '
+      "DEFAULT 'flat' CHECK (interest_method IN ('flat', 'reducing'))",
+    );
+    batch.execute(
+      'ALTER TABLE ${Tables.loans} ADD COLUMN original_installment_minor '
+      'INTEGER',
+    );
+    batch.execute(
+      'ALTER TABLE ${Tables.loans} ADD COLUMN original_term_months INTEGER',
+    );
+    batch.execute(
+      'ALTER TABLE ${Tables.loanInstallments} ADD COLUMN interest_minor '
+      'INTEGER',
+    );
+    batch.execute(
+      'ALTER TABLE ${Tables.loanRepayments} ADD COLUMN allocation TEXT',
+    );
+    await batch.commit(noResult: true);
+  }
 
   /// v7: money lent (loans given), their schedules, repayments and reminder
   /// settings. Adds tables only; no existing row changes.

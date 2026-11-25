@@ -2,11 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:money_mate/core/database/app_database.dart';
 import 'package:money_mate/core/services/loan_reminder_planner.dart';
 import 'package:money_mate/core/services/notification_service.dart';
-import 'package:money_mate/core/utils/date_range.dart';
 import 'package:money_mate/models/loan_model.dart';
-import 'package:money_mate/models/report_models.dart';
 import 'package:money_mate/models/transaction_model.dart';
-import 'package:money_mate/providers/dashboard_provider.dart';
 import 'package:money_mate/providers/loan_provider.dart';
 import 'package:money_mate/repositories/loan_repository.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -235,13 +232,25 @@ void main() {
         dueDay: 1,
       );
       final edited = provider.snapshotById(s.id)!;
-      // Instalments 1 (paid) and 2 (partly paid) keep their ID and amount.
-      expect(edited.loan.schedule.take(2), paid.loan.schedule.take(2));
-      // 1,200,000 − 200,000 kept = 1,000,000 → five of 200,000 from Feb.
-      final rest = edited.loan.schedule.skip(2).toList();
-      expect(rest.map((i) => i.expectedMinor), List.filled(5, 200000));
-      expect(rest.first.dueDate, DateTime(2027, 2, 1));
+      // Instalment 1 (paid, with 500 extra capital) keeps its ID and amount;
+      // the extra is now part of it (the repayment's record still shows it).
+      expect(edited.loan.schedule.first.id, paid.loan.schedule.first.id);
+      expect(edited.loan.schedule.first.expectedMinor, 150000);
+      expect(edited.loan.schedule.first.principalMinor, 150000);
+      expect(
+        provider.repaymentsOf(s.id).single.allocation!.extraPrincipalMinor,
+        50000,
+      );
+      // 1,200,000 − 150,000 kept = 1,050,000 → five of 200,000 and 50,000
+      // from January.
+      final rest = edited.loan.schedule.skip(1).toList();
+      expect(rest.map((i) => i.expectedMinor), [
+        ...List.filled(5, 200000),
+        50000,
+      ]);
+      expect(rest.first.dueDate, DateTime(2027, 1, 1));
       expect(edited.receivedMinor, 150000);
+      expect(edited.currentEmiMinor, 200000);
       expect(provider.repaymentsOf(s.id), hasLength(1));
     });
 
@@ -365,7 +374,7 @@ void main() {
 
   group('accounting', () {
     test(
-      'lent principal leaves the balance; interest is the only income',
+      'lending figures: unpaid principal and interest received, per scope',
       () async {
         // 10,000 lent at 10% for a year: 11,000 owed.
         final loan = await provider.createLoan(
@@ -384,41 +393,104 @@ void main() {
           amountMinor: 550000,
           date: DateTime(2026, 11, 20),
         );
-        expect(provider.lentOutstandingForScope(scope), 500000);
-        expect(provider.interestForScope(scope), 50000);
+        // Interest is paid first within the instalment: 1,000 interest,
+        // 4,500 principal.
+        expect(provider.lentOutstandingForScope(scope), 550000);
+        expect(provider.interestForScope(scope), 100000);
         // Household figures are unaffected by personal lending.
         expect(
           provider.lentOutstandingForScope(const ScopeFilter.shared('h')),
           0,
         );
-
-        // Available = income − expenses − savings − unpaid principal +
-        // interest: 20,000 − 0 − 0 − 5,000 + 500 = 15,500.
-        final data = DashboardData(
-          balanceMinor: 2000000,
-          week: PeriodTotals(
-            range: PeriodUtils.weekRange(now),
-            incomeMinor: 0,
-            expenseMinor: 0,
-          ),
-          month: PeriodTotals(
-            range: PeriodUtils.monthRange(now),
-            incomeMinor: 0,
-            expenseMinor: 0,
-          ),
-          previousWeekExpenseMinor: 0,
-          previousMonthExpenseMinor: 0,
-          weekDailyExpenses: const [],
-          recentTransactions: const [],
-          monthCategoryShares: const [],
-          lentMinor: provider.lentOutstandingForScope(scope),
-          lendingInterestMinor: provider.interestForScope(scope),
-        );
-        expect(data.availableMinor, 1550000);
-        // Lending never changes the balance itself (income − expenses).
-        expect(data.balanceMinor, 2000000);
       },
     );
+  });
+
+  group('extra capital repayments', () {
+    test('the repayment keeps how it was applied, for the record', () async {
+      final s = await emi();
+      final r = await provider.recordRepayment(
+        s,
+        amountMinor: 150000,
+        date: DateTime(2026, 11, 20),
+      );
+      final a = provider.repaymentById(r.id)!.allocation!;
+      expect(a.scheduledEmiMinor, 100000);
+      expect(a.appliedToInstallmentMinor, 100000);
+      expect(a.extraPrincipalMinor, 50000);
+      expect(a.principalBeforeMinor, 1200000);
+      expect(a.principalAfterMinor, 1050000);
+      expect(a.previousEmiMinor, 100000);
+      expect(a.revisedEmiMinor, 95455);
+      expect(a.remainingInstallments, 11);
+      expect(a.effectiveFrom, DateTime(2027, 1, 1));
+      expect(a.recalculatedAt, now);
+      final after = provider.snapshotById(s.id)!;
+      expect(after.currentEmiMinor, 95455);
+      expect(after.loan.originalInstallmentMinor, 100000);
+      // The preview shows the same treatment before saving.
+      final preview = provider.previewRepayment(
+        after,
+        amountMinor: 95455 + 10000,
+      );
+      expect(preview.extraPrincipalMinor, 10000);
+      expect(preview.installmentNumber, 2);
+    });
+
+    test('nothing above the settlement amount can be recorded', () async {
+      final s = await emi(rateBp: 1200, installment: 112000);
+      final max = provider.maxRepaymentMinor(s);
+      // Settling now: this EMI plus the capital after it, not the future
+      // interest.
+      expect(max, lessThan(s.outstandingMinor));
+      await expectLater(
+        provider.recordRepayment(
+          s,
+          amountMinor: max + 1,
+          date: DateTime(2026, 11, 20),
+        ),
+        throwsA(isA<LoanException>()),
+      );
+      await provider.recordRepayment(
+        s,
+        amountMinor: max,
+        date: DateTime(2026, 11, 20),
+      );
+      expect(provider.snapshotById(s.id)!.isCompleted, isTrue);
+    });
+
+    test('reminders switch to the revised EMI', () async {
+      final s = await emi();
+      await provider.syncReminders();
+      final before = Map.of(notifier.scheduled);
+      expect(
+        before.values.map((n) => n.notification.body).join(),
+        contains('AED 1,000.00'),
+      );
+      await provider.recordRepayment(
+        s,
+        amountMinor: 150000,
+        date: DateTime(2026, 11, 20),
+      );
+      await provider.syncReminders();
+      // The same instalments, so the same IDs: replaced, not duplicated.
+      final firstId = s.installments.first.id;
+      expect(
+        notifier.scheduled.values.where(
+          (n) => n.notification.data['installmentId'] == firstId,
+        ),
+        isEmpty,
+      );
+      final bodies = notifier.scheduled.values
+          .map((n) => n.notification.body)
+          .toList();
+      expect(bodies, isNotEmpty);
+      expect(bodies.every((b) => b.contains('AED 954.55')), isTrue);
+      expect(
+        notifier.scheduled.keys.toSet().difference(before.keys.toSet()),
+        isEmpty,
+      );
+    });
   });
 
   group('reminders', () {
