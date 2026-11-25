@@ -46,6 +46,20 @@ class Tables {
   /// Shared-goal invitations the user sent or received, as last read from
   /// the cloud.
   static const String savingsInvitations = 'savings_invitations';
+
+  /// Money lent to someone (personal or household). Lending records and
+  /// everything below are never removed by the retention clean-up.
+  static const String loans = 'loans';
+
+  /// The repayment schedule of each loan (one row for a one-time loan).
+  static const String loanInstallments = 'loan_installments';
+
+  /// Money paid back. Permanent records: voided, never deleted.
+  static const String loanRepayments = 'loan_repayments';
+
+  /// Reminder settings of each loan, including the household members the
+  /// household owner chose to remind.
+  static const String loanReminders = 'loan_reminder_settings';
 }
 
 /// Cloud sync state of a local row (`transactions.sync_status`).
@@ -208,7 +222,105 @@ class AppDatabase {
     4: _migrateToV4,
     5: _migrateToV5,
     6: _migrateToV6,
+    7: _migrateToV7,
   };
+
+  /// v7: money lent (loans given), their schedules, repayments and reminder
+  /// settings. Adds tables only; no existing row changes.
+  ///
+  /// Lending is a transfer, not income or an expense, so none of it is in
+  /// the `transactions` table and reports and budgets never see it. There
+  /// are no foreign keys from instalments, repayments and reminder
+  /// settings to loans because they may arrive from the cloud in any order;
+  /// rows of a missing loan are not counted.
+  static Future<void> _migrateToV7(Database db) async {
+    final batch = db.batch();
+    batch.execute('''
+      CREATE TABLE ${Tables.loans} (
+        id TEXT PRIMARY KEY,
+        household_id TEXT NOT NULL DEFAULT '',
+        borrower_name TEXT NOT NULL,
+        borrower_phone TEXT NOT NULL DEFAULT '',
+        borrower_email TEXT NOT NULL DEFAULT '',
+        principal_minor INTEGER NOT NULL CHECK (principal_minor > 0),
+        interest_rate_bp INTEGER NOT NULL DEFAULT 0
+          CHECK (interest_rate_bp >= 0),
+        interest_minor INTEGER NOT NULL DEFAULT 0 CHECK (interest_minor >= 0),
+        lent_date INTEGER NOT NULL,
+        repayment_type TEXT NOT NULL
+          CHECK (repayment_type IN ('monthly', 'oneTime')),
+        installment_minor INTEGER,
+        first_due_date INTEGER,
+        due_day INTEGER,
+        end_date INTEGER,
+        due_date INTEGER,
+        notes TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        created_by TEXT,
+        created_by_name TEXT,
+        updated_by TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (sync_status IN ('pending', 'synced'))
+      )
+    ''');
+    batch.execute(
+      'CREATE INDEX idx_loans_scope ON ${Tables.loans}(household_id)',
+    );
+    batch.execute('''
+      CREATE TABLE ${Tables.loanInstallments} (
+        id TEXT PRIMARY KEY,
+        loan_id TEXT NOT NULL,
+        number INTEGER NOT NULL CHECK (number > 0),
+        due_date INTEGER NOT NULL,
+        expected_minor INTEGER NOT NULL CHECK (expected_minor > 0)
+      )
+    ''');
+    batch.execute(
+      'CREATE INDEX idx_loan_installments_loan '
+      'ON ${Tables.loanInstallments}(loan_id, number)',
+    );
+    batch.execute('''
+      CREATE TABLE ${Tables.loanRepayments} (
+        id TEXT PRIMARY KEY,
+        loan_id TEXT NOT NULL,
+        amount_minor INTEGER NOT NULL CHECK (amount_minor > 0),
+        date INTEGER NOT NULL,
+        method TEXT NOT NULL DEFAULT 'cash',
+        note TEXT NOT NULL DEFAULT '',
+        installment_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        user_uid TEXT,
+        user_name TEXT,
+        voided INTEGER NOT NULL DEFAULT 0,
+        voided_at INTEGER,
+        voided_by TEXT,
+        void_reason TEXT NOT NULL DEFAULT '',
+        sync_status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (sync_status IN ('pending', 'synced', 'rejected')),
+        sync_error TEXT
+      )
+    ''');
+    batch.execute(
+      'CREATE INDEX idx_loan_repayments_loan '
+      'ON ${Tables.loanRepayments}(loan_id, date)',
+    );
+    batch.execute('''
+      CREATE TABLE ${Tables.loanReminders} (
+        loan_id TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        paused INTEGER NOT NULL DEFAULT 0,
+        offsets TEXT NOT NULL DEFAULT '[]',
+        notify_uids TEXT NOT NULL DEFAULT '[]',
+        updated_at INTEGER NOT NULL,
+        updated_by TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (sync_status IN ('pending', 'synced'))
+      )
+    ''');
+    await batch.commit(noResult: true);
+  }
 
   /// v6: household and independent shared savings goals.
   ///

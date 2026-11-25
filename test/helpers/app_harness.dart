@@ -13,6 +13,7 @@ import 'package:money_mate/models/app_user.dart';
 import 'package:money_mate/models/transaction_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'fake_loans.dart';
 import 'fakes.dart';
 
 /// Pumps the full app with in-memory repositories and a fake auth service
@@ -24,10 +25,12 @@ class TestHarness {
     this.households,
     this.dataReset,
     bool withSavings = false,
+    bool withLoans = false,
     this.photos,
     this.photoPicker,
     this.localNotifier,
   }) : savings = withSavings ? InMemorySavingsRepository() : null,
+       loans = withLoans ? InMemoryLoanRepository() : null,
        auth = FakeAuthService(signedIn: user),
        transactions = InMemoryTransactionRepository(initial: transactions),
        categories = InMemoryCategoryRepository(),
@@ -45,6 +48,9 @@ class TestHarness {
 
   /// Savings goals; null (the default) leaves the feature hidden.
   final InMemorySavingsRepository? savings;
+
+  /// Money lent; null (the default) leaves the feature hidden.
+  final InMemoryLoanRepository? loans;
 
   /// Household management; null leaves households unavailable.
   final HouseholdService? households;
@@ -79,6 +85,7 @@ class TestHarness {
     dataResetService: dataReset,
     recurringRepository: recurring,
     savingsRepository: savings,
+    loanRepository: loans,
   );
 
   /// Every other account starts with an empty device database.
@@ -93,6 +100,7 @@ class TestHarness {
       dataResetService: dataReset,
       recurringRepository: InMemoryRecurringRepository(transactions),
       savingsRepository: savings == null ? null : InMemorySavingsRepository(),
+      loanRepository: loans == null ? null : InMemoryLoanRepository(),
     );
   }
 

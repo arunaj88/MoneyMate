@@ -103,6 +103,29 @@ class RecordingLocalNotifier implements LocalNotifier {
   @override
   Future<void> show(AppNotification notification) async =>
       shown.add(notification);
+
+  /// Scheduled notifications by ID, like the system keeps them.
+  final Map<int, ScheduledNotification> scheduled = {};
+  int scheduleCalls = 0;
+  int cancelCalls = 0;
+
+  @override
+  Future<void> schedule(ScheduledNotification notification) async {
+    scheduleCalls++;
+    scheduled[notification.id] = notification;
+  }
+
+  @override
+  Future<void> cancelScheduled(int id) async {
+    cancelCalls++;
+    scheduled.remove(id);
+  }
+
+  @override
+  Future<Set<int>> scheduledIds(NotificationChannel channel) async => {
+    for (final s in scheduled.values)
+      if (s.notification.channel == channel) s.id,
+  };
 }
 
 /// In-memory [NotificationCloud] keyed like Firestore.

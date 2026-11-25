@@ -22,6 +22,16 @@ rules_version = '2';
 //                 entry of exactly that amount, in one transaction, and
 //                 never below zero. Entries are attributed to the caller and
 //                 are immutable.
+// Lending:        users/{uid}/loans | loanRepayments | loanReminders (owner
+//                 only) and households/{householdId}/loans | loanRepayments |
+//                 loanReminders (active members). Loans keep a running total
+//                 (receivedMinor) that may only change together with one new
+//                 or voided repayment of exactly that amount, in one
+//                 transaction, and stays between zero and what is owed.
+//                 Repayments are attributed to the caller and never edited
+//                 or deleted, only voided. Household reminder settings,
+//                 including which members are reminded, are changed by the
+//                 household owner only.
 // Devices:        users/{uid}/devices/{deviceId}: one document per app
 //                 installation with its push (FCM) token and notification
 //                 preferences. Owner only; deleted on sign-out.
@@ -257,6 +267,141 @@ service cloud.firestore {
         .hasOnly(['status', 'updatedAt', 'serverUpdatedAt']);
     }
 
+    // ------------------------------------------------------------ lending
+
+    // Loan terms and schedule. A soft-deleted loan keeps its other fields
+    // (writes are merged), which still have to be valid.
+    function validLoan(loanId) {
+      let d = incoming();
+      return validRecord(loanId)
+        && ((d.deleted == true && !('principalMinor' in d))
+          || (d.borrowerName is string
+            && d.borrowerName.size() > 0
+            && d.borrowerName.size() <= 80
+            && optionalString(d, 'borrowerPhone', 32)
+            && optionalString(d, 'borrowerEmail', 254)
+            && optionalString(d, 'notes', 500)
+            && d.principalMinor is int
+            && d.principalMinor > 0
+            && d.principalMinor <= 100000000000000
+            && d.interestRateBp is int
+            && d.interestRateBp >= 0
+            && d.interestRateBp <= 10000
+            && d.interestMinor is int
+            && d.interestMinor >= 0
+            && d.totalOwedMinor == d.principalMinor + d.interestMinor
+            && d.repaymentType in ['monthly', 'oneTime']
+            && d.lentDate is int
+            && d.createdAt is int
+            && d.schedule is list
+            && d.schedule.size() <= 600
+            // Edits can never owe less than was already repaid.
+            && d.get('receivedMinor', 0) <= d.totalOwedMinor));
+    }
+
+    // Details change; the running total does not.
+    function loanTotalsUnchanged() {
+      return incoming().get('receivedMinor', 0) == resource.data.get('receivedMinor', 0)
+        && incoming().get('lastRepaymentId', '') == resource.data.get('lastRepaymentId', '')
+        && incoming().get('lastRepaymentOp', '') == resource.data.get('lastRepaymentOp', '');
+    }
+
+    // Only the running total changes: up by a repayment created in the same
+    // transaction, or down by one voided in it; never below zero or above
+    // what is owed.
+    function loanTotalMoved(repaymentPath, loanId) {
+      let before = resource.data.get('receivedMinor', 0);
+      let after = incoming().get('receivedMinor', 0);
+      return incoming().diff(resource.data).affectedKeys()
+          .hasOnly(['receivedMinor', 'lastRepaymentId', 'lastRepaymentOp'])
+        && resource.data.get('deleted', false) == false
+        && after >= 0
+        && after <= resource.data.totalOwedMinor
+        && ((incoming().lastRepaymentOp == 'add'
+            && !exists(repaymentPath)
+            && existsAfter(repaymentPath)
+            && getAfter(repaymentPath).data.loanId == loanId
+            && getAfter(repaymentPath).data.voided == false
+            && after == before + getAfter(repaymentPath).data.amountMinor)
+          || (incoming().lastRepaymentOp == 'void'
+            && exists(repaymentPath)
+            && get(repaymentPath).data.loanId == loanId
+            && get(repaymentPath).data.voided == false
+            && getAfter(repaymentPath).data.voided == true
+            && after == before - get(repaymentPath).data.amountMinor));
+    }
+
+    function validRepayment(repaymentId) {
+      let d = incoming();
+      return validRecord(repaymentId)
+        && d.deleted == false
+        && d.loanId is string
+        && d.loanId.size() > 0
+        && d.loanId.size() <= 128
+        && d.amountMinor is int
+        && d.amountMinor > 0
+        && d.amountMinor <= 100000000000000
+        && d.date is int
+        && d.createdAt is int
+        && d.method is string
+        && d.method.size() <= 32
+        && d.voided is bool
+        && optionalString(d, 'note', 200)
+        && optionalString(d, 'userName', 80)
+        && optionalString(d, 'installmentId', 128);
+    }
+
+    // A new repayment: attributed to the caller, for a live loan, and
+    // written together with the loan's new total.
+    function newRepayment(repaymentId, loanPath) {
+      let d = incoming();
+      let loan = get(loanPath).data;
+      let after = getAfter(loanPath).data;
+      return validRepayment(repaymentId)
+        && d.voided == false
+        && d.userUid == request.auth.uid
+        && loan.get('deleted', false) == false
+        && after.get('lastRepaymentId', '') == repaymentId
+        && after.get('lastRepaymentOp', '') == 'add'
+        && after.get('receivedMinor', 0) == loan.get('receivedMinor', 0) + d.amountMinor;
+    }
+
+    // Voiding is the only change a repayment ever gets: by the caller, with
+    // the loan's total lowered by its amount in the same transaction.
+    function voidsRepayment(repaymentId, loanPath) {
+      let d = incoming();
+      let after = getAfter(loanPath).data;
+      return resource.data.voided == false
+        && d.voided == true
+        && d.diff(resource.data).affectedKeys()
+          .hasOnly(['voided', 'voidedAt', 'voidedBy', 'voidReason', 'updatedAt', 'serverUpdatedAt'])
+        && d.voidedBy == request.auth.uid
+        && d.voidedAt is int
+        && d.updatedAt is int
+        && optionalString(d, 'voidReason', 200)
+        && d.serverUpdatedAt == request.time
+        && after.get('lastRepaymentId', '') == repaymentId
+        && after.get('lastRepaymentOp', '') == 'void'
+        && after.get('receivedMinor', 0) == get(loanPath).data.get('receivedMinor', 0) - resource.data.amountMinor;
+    }
+
+    function validLoanReminders(loanId) {
+      let d = incoming();
+      return validRecord(loanId)
+        && d.loanId == loanId
+        && d.enabled is bool
+        && d.paused is bool
+        && d.offsets is list
+        && d.offsets.size() <= 10
+        && d.notifyUids is list
+        && d.notifyUids.size() <= 20
+        && d.updatedBy == request.auth.uid;
+    }
+
+    function householdOwnerUid(householdId) {
+      return get(/databases/$(database)/documents/households/$(householdId)).data.ownerUid;
+    }
+
     // ------------------------------------------------------ personal data
 
     match /users/{uid} {
@@ -310,6 +455,44 @@ service cloud.firestore {
         allow create, update: if isUser(uid)
           && validSavingsEntry(entryId)
           && incoming().get('userUid', uid) == uid;
+        allow delete: if false;
+      }
+
+      // Money the user lent. The running total moves only with a repayment
+      // (see loanTotalMoved).
+      match /loans/{loanId} {
+        allow read: if isUser(uid);
+        allow create: if isUser(uid)
+          && validLoan(loanId)
+          && !('householdId' in incoming())
+          && (incoming().deleted == true
+            || (incoming().get('receivedMinor', 0) == 0
+              && !('lastRepaymentId' in incoming())));
+        allow update: if isUser(uid) && (
+          (validLoan(loanId)
+            && loanTotalsUnchanged()
+            && !('householdId' in incoming())
+            && incoming().get('createdAt', 0) == resource.data.get('createdAt', 0))
+          || loanTotalMoved(
+            /databases/$(database)/documents/users/$(uid)/loanRepayments/$(incoming().get('lastRepaymentId', '-')),
+            loanId));
+        allow delete: if false;
+      }
+
+      match /loanRepayments/{repaymentId} {
+        allow read: if isUser(uid);
+        allow create: if isUser(uid)
+          && newRepayment(repaymentId,
+            /databases/$(database)/documents/users/$(uid)/loans/$(incoming().loanId));
+        allow update: if isUser(uid)
+          && voidsRepayment(repaymentId,
+            /databases/$(database)/documents/users/$(uid)/loans/$(resource.data.loanId));
+        allow delete: if false;
+      }
+
+      match /loanReminders/{loanId} {
+        allow read: if isUser(uid);
+        allow create, update: if isUser(uid) && validLoanReminders(loanId);
         allow delete: if false;
       }
 
@@ -435,6 +618,61 @@ service cloud.firestore {
           && collaborativeEntry(entryId,
             /databases/$(database)/documents/households/$(householdId)/savingsGoals/$(incoming().goalId));
         allow update, delete: if false;
+      }
+
+      // Household lending: any active member records loans and repayments,
+      // as with shared transactions. Only the member who created a loan, or
+      // the household owner, deletes it.
+      match /loans/{loanId} {
+        allow read: if isActiveMember(householdId);
+        allow create: if isActiveMember(householdId)
+          && validLoan(loanId)
+          && incoming().updatedBy == request.auth.uid
+          && (incoming().deleted == true
+            || (incoming().householdId == householdId
+              && incoming().createdBy == request.auth.uid
+              && incoming().get('receivedMinor', 0) == 0
+              && !('lastRepaymentId' in incoming())));
+        allow update: if isActiveMember(householdId) && (
+          (validLoan(loanId)
+            && loanTotalsUnchanged()
+            && incoming().updatedBy == request.auth.uid
+            && incoming().get('householdId', householdId) == householdId
+            && incoming().get('createdBy', '') == resource.data.get('createdBy', '')
+            && incoming().get('createdAt', 0) == resource.data.get('createdAt', 0)
+            && (incoming().deleted == false
+              || resource.data.get('deleted', false) == true
+              || isOwner(householdId)
+              || resource.data.get('createdBy', '') == request.auth.uid))
+          || loanTotalMoved(
+            /databases/$(database)/documents/households/$(householdId)/loanRepayments/$(incoming().get('lastRepaymentId', '-')),
+            loanId));
+        allow delete: if false;
+      }
+
+      match /loanRepayments/{repaymentId} {
+        allow read: if isActiveMember(householdId);
+        allow create: if isActiveMember(householdId)
+          && newRepayment(repaymentId,
+            /databases/$(database)/documents/households/$(householdId)/loans/$(incoming().loanId));
+        allow update: if isActiveMember(householdId)
+          && voidsRepayment(repaymentId,
+            /databases/$(database)/documents/households/$(householdId)/loans/$(resource.data.loanId));
+        allow delete: if false;
+      }
+
+      // Reminder settings and who is reminded: the household owner decides.
+      // A member who records a loan may only create its settings with the
+      // owner as the sole recipient, so nobody can add themselves (or
+      // anyone else) to the list.
+      match /loanReminders/{loanId} {
+        allow read: if isActiveMember(householdId);
+        allow create: if isActiveMember(householdId)
+          && validLoanReminders(loanId)
+          && (isOwner(householdId)
+            || incoming().notifyUids.hasOnly([householdOwnerUid(householdId)]));
+        allow update: if isOwner(householdId) && validLoanReminders(loanId);
+        allow delete: if false;
       }
 
       // A shared budget crossed 80%, 90% or 100%. The ID names the budget,

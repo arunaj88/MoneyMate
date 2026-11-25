@@ -15,11 +15,13 @@ import 'package:money_mate/providers/household_provider.dart';
 import 'package:money_mate/providers/notification_provider.dart';
 import 'package:money_mate/providers/recurring_provider.dart';
 import 'package:money_mate/providers/reset_provider.dart';
+import 'package:money_mate/providers/loan_provider.dart';
 import 'package:money_mate/providers/savings_provider.dart';
 import 'package:money_mate/providers/settings_provider.dart';
 import 'package:money_mate/providers/sync_provider.dart';
 import 'package:money_mate/shared/widgets/dialogs.dart';
 import 'package:money_mate/features/household/widgets/household_widgets.dart';
+import 'package:money_mate/features/lending/lending_actions.dart';
 import 'package:money_mate/features/savings/savings_actions.dart';
 import 'package:money_mate/features/settings/data_management.dart';
 import 'package:money_mate/features/settings/profile_photo.dart';
@@ -370,6 +372,17 @@ class SettingsScreen extends StatelessWidget {
                   subtitle: const Text('Trips, emergency fund, gold and more'),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => openSavingsScreen(context),
+                ),
+              if (context.select<LoanProvider, bool>((l) => l.isAvailable))
+                ListTile(
+                  key: const Key('lendingTile'),
+                  leading: const Icon(Icons.handshake_outlined),
+                  title: const Text('Money lent'),
+                  subtitle: const Text(
+                    'Loans you gave, repayments and reminders',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => openLendingScreen(context),
                 ),
               if (context.select<RecurringProvider, bool>((r) => r.isAvailable))
                 ListTile(

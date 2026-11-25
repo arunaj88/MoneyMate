@@ -11,6 +11,7 @@ import 'package:money_mate/providers/auth_provider.dart';
 import 'package:money_mate/providers/category_provider.dart';
 import 'package:money_mate/providers/dashboard_provider.dart';
 import 'package:money_mate/providers/household_provider.dart';
+import 'package:money_mate/providers/loan_provider.dart';
 import 'package:money_mate/providers/reset_provider.dart';
 import 'package:money_mate/models/savings_model.dart';
 import 'package:money_mate/providers/savings_provider.dart';
@@ -23,6 +24,8 @@ import 'package:money_mate/shared/widgets/stat_widgets.dart';
 import 'package:money_mate/shared/widgets/transaction_tile.dart';
 import 'package:money_mate/shared/widgets/user_avatar.dart';
 import 'package:money_mate/features/household/widgets/household_widgets.dart';
+import 'package:money_mate/features/lending/lending_actions.dart';
+import 'package:money_mate/features/lending/widgets/lending_widgets.dart';
 import 'package:money_mate/features/savings/savings_actions.dart';
 import 'package:money_mate/features/savings/widgets/savings_widgets.dart';
 import 'package:money_mate/features/settings/reset_app.dart';
@@ -219,20 +222,30 @@ class _DashboardContent extends StatelessWidget {
       (s) => s.summaryOf(ownership).goalCount > 0,
     );
     final showSavings = savingsAvailable;
+    // Money lent from this view's balance: personal loans for the personal
+    // view, the household's for the household view.
+    final hasLoans = context.select<LoanProvider, bool>(
+      (l) => l.isAvailable && l.hasLoansIn(data.scope),
+    );
+    final lendingFilter = shared ? LoanFilter.household : LoanFilter.personal;
     final sections = <Widget>[
       if (context.watch<ResetProvider>().restorePending)
         const RestorePendingBanner(),
       BalanceCard(
-        title: switch ((shared, showSavings && hasGoals)) {
+        title: switch ((shared, (showSavings && hasGoals) || hasLoans)) {
           (true, true) => 'Household available balance',
           (true, false) => 'Household balance',
           (false, true) => 'Available balance',
           (false, false) => 'Total balance',
         },
-        // Money in savings goals is not available to spend.
-        balanceMinor: showSavings ? data.availableMinor : data.balanceMinor,
+        // Money in savings goals or lent out is not available to spend.
+        balanceMinor: showSavings || hasLoans
+            ? data.availableMinor
+            : data.balanceMinor,
         savedMinor: showSavings && hasGoals ? data.savedMinor : null,
         onSavingsTap: () => openSavingsScreen(context, ownership: ownership),
+        lentMinor: hasLoans ? data.lentMinor : null,
+        onLentTap: () => openLendingScreen(context, filter: lendingFilter),
         monthIncomeMinor: data.month.incomeMinor,
         monthExpenseMinor: data.month.expenseMinor,
         formatter: formatter,
@@ -303,6 +316,8 @@ class _DashboardContent extends StatelessWidget {
       ),
       if (showSavings)
         SavingsOverviewCard(formatter: formatter, ownership: ownership),
+      if (hasLoans)
+        LendingOverviewCard(formatter: formatter, scope: data.scope),
       AppCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

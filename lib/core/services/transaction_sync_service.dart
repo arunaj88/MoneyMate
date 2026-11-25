@@ -7,7 +7,10 @@ import 'package:money_mate/repositories/savings_repository.dart';
 import 'package:money_mate/repositories/settings_sync_repository.dart';
 import 'package:money_mate/repositories/sync_repository.dart';
 import 'package:money_mate/core/constants/app_constants.dart';
+import 'package:money_mate/core/services/cloud_loan_store.dart';
 import 'package:money_mate/core/services/cloud_savings_store.dart';
+import 'package:money_mate/core/services/loan_sync.dart';
+import 'package:money_mate/repositories/loan_repository.dart';
 import 'package:money_mate/core/services/savings_sync.dart';
 import 'package:money_mate/core/services/cloud_transaction_store.dart';
 import 'package:money_mate/core/services/sync_conflict_resolver.dart';
@@ -103,6 +106,9 @@ class HistoryResult {
 /// 5. **Savings** – personal, household and shared goals and their
 ///    history (see [SavingsSyncEngine]). Savings are never removed by the
 ///    retention clean-up.
+/// 6. **Lending** – loans given, repayments and reminder settings, personal
+///    and household (see [LoanSyncEngine]). Never removed by the retention
+///    clean-up either.
 ///
 /// If the household refuses access (the user was removed), the personal
 /// sync still completes and the household is reported in
@@ -121,6 +127,8 @@ class TransactionSyncService {
     CloudRecordStore? records,
     LocalSavingsSyncStore? savingsLocal,
     CloudSavingsStore? savingsCloud,
+    LocalLoanSyncStore? loansLocal,
+    CloudLoanStore? loansCloud,
     DateTime Function()? clock,
     this.pushBatchSize = 200,
     this.pullPageSize = 300,
@@ -136,6 +144,14 @@ class TransactionSyncService {
                settings: local,
                pageSize: pullPageSize,
              ),
+       _loans = loansLocal == null || loansCloud == null
+           ? null
+           : LoanSyncEngine(
+               local: loansLocal,
+               cloud: loansCloud,
+               settings: local,
+               pageSize: pullPageSize,
+             ),
        _clock = clock ?? DateTime.now;
 
   final LocalSyncStore _local;
@@ -143,6 +159,7 @@ class TransactionSyncService {
   final LocalSettingsSyncStore? _settings;
   final CloudRecordStore? _records;
   final SavingsSyncEngine? _savings;
+  final LoanSyncEngine? _loans;
   final DateTime Function() _clock;
   final int pushBatchSize;
   final int pullPageSize;
@@ -262,6 +279,12 @@ class TransactionSyncService {
         download: download,
         restore: restore,
       );
+      await _loans?.sync(
+        personal,
+        report,
+        download: download,
+        restore: restore,
+      );
 
       if (householdId != null) {
         final shared = CloudPartition.household(uid, householdId);
@@ -281,6 +304,12 @@ class TransactionSyncService {
           await _savings?.syncHousehold(
             uid,
             householdId,
+            report,
+            download: download,
+            restore: restore,
+          );
+          await _loans?.sync(
+            shared,
             report,
             download: download,
             restore: restore,

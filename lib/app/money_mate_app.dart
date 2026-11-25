@@ -14,6 +14,7 @@ import 'package:money_mate/providers/budget_provider.dart';
 import 'package:money_mate/providers/category_provider.dart';
 import 'package:money_mate/providers/dashboard_provider.dart';
 import 'package:money_mate/providers/household_provider.dart';
+import 'package:money_mate/providers/loan_provider.dart';
 import 'package:money_mate/providers/notification_provider.dart';
 import 'package:money_mate/providers/recurring_provider.dart';
 import 'package:money_mate/providers/report_provider.dart';
@@ -204,17 +205,49 @@ List<SingleChildWidget> _accountProviders(
     update: (_, auth, transactions, savings) =>
         savings!..attach(auth, transactions),
   ),
-  ChangeNotifierProxyProvider4<
+  ChangeNotifierProxyProvider5<
+    AuthProvider,
+    TransactionProvider,
+    HouseholdProvider,
+    SettingsProvider,
+    NotificationProvider,
+    LoanProvider
+  >(
+    // Not lazy: repayment reminders are planned from start-up.
+    lazy: false,
+    create: (_) => LoanProvider(
+      data.loanRepository,
+      cloud: deps.loansCloud,
+      notifier: deps.localNotifier,
+    ),
+    update:
+        (_, auth, transactions, household, settings, notifications, loans) =>
+            loans!..attach(
+              auth: auth,
+              transactions: transactions,
+              household: household,
+              settings: settings,
+              notifications: notifications,
+            ),
+  ),
+  ChangeNotifierProxyProvider5<
     SettingsProvider,
     CategoryProvider,
     TransactionProvider,
     SavingsProvider,
+    LoanProvider,
     DashboardProvider
   >(
     create: (_) => DashboardProvider(data.transactionRepository),
-    update: (_, settings, categories, transactions, savings, dashboard) =>
-        dashboard!
-          ..updateDependencies(settings, categories, transactions, savings),
+    update:
+        (_, settings, categories, transactions, savings, loans, dashboard) =>
+            dashboard!..updateDependencies(
+              settings,
+              categories,
+              transactions,
+              savings,
+              loans,
+            ),
   ),
   ChangeNotifierProxyProvider4<
     SettingsProvider,
@@ -256,10 +289,9 @@ List<SingleChildWidget> _accountProviders(
   >(
     // Not lazy: sync runs in the background from start-up.
     lazy: false,
-    create: (_) => SyncProvider(
-      service: data.syncService,
-      connectivity: deps.connectivity,
-    ),
+    create: (context) =>
+        SyncProvider(service: data.syncService, connectivity: deps.connectivity)
+          ..watchLoans(context.read<LoanProvider>()),
     update:
         (
           _,

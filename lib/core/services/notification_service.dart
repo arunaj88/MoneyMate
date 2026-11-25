@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' show Color;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/timezone.dart' as tz;
 
 import 'package:money_mate/models/scope_models.dart';
 
@@ -34,6 +35,11 @@ enum NotificationChannel {
     'recurring',
     'Recurring transactions',
     'Salary, rent and other repeats added automatically',
+  ),
+  loanReminders(
+    'loan_reminders',
+    'Repayment reminders',
+    'Money you lent: repayments coming up, due today or overdue',
   );
 
   const NotificationChannel(this.id, this.label, this.description);
@@ -105,6 +111,12 @@ enum NotificationDestination {
   household,
   savings,
   goal,
+
+  /// The money lent overview.
+  lending,
+
+  /// One lending record (and instalment).
+  loan,
 }
 
 /// Where tapping a notification takes the user.
@@ -115,9 +127,17 @@ class NotificationTarget {
     this.goalId,
     this.ownership,
     this.scope,
+    this.loanId,
+    this.installmentId,
   });
 
   final NotificationDestination destination;
+
+  /// For [NotificationDestination.loan].
+  final String? loanId;
+
+  /// The instalment a repayment reminder is about.
+  final String? installmentId;
 
   /// For [NotificationDestination.goal].
   final String? goalId;
@@ -159,6 +179,19 @@ class NotificationTarget {
           NotificationDestination.budget,
           scope: DataScope.personal(),
         );
+      case 'loan_reminder':
+        final loanId = data['loanId'];
+        if (loanId == null || loanId.isEmpty) {
+          return const NotificationTarget(NotificationDestination.lending);
+        }
+        final installmentId = data['installmentId'];
+        return NotificationTarget(
+          NotificationDestination.loan,
+          loanId: loanId,
+          installmentId: installmentId == null || installmentId.isEmpty
+              ? null
+              : installmentId,
+        );
       case 'household_savings':
       case 'shared_goal':
         return hasGoal
@@ -183,6 +216,9 @@ class NotificationTarget {
       NotificationChannel.householdActivity => const NotificationTarget(
         NotificationDestination.dashboard,
       ),
+      NotificationChannel.loanReminders => const NotificationTarget(
+        NotificationDestination.lending,
+      ),
     };
   }
 
@@ -192,15 +228,19 @@ class NotificationTarget {
       other.destination == destination &&
       other.goalId == goalId &&
       other.ownership == ownership &&
-      other.scope == scope;
+      other.scope == scope &&
+      other.loanId == loanId &&
+      other.installmentId == installmentId;
 
   @override
-  int get hashCode => Object.hash(destination, goalId, ownership, scope);
+  int get hashCode =>
+      Object.hash(destination, goalId, ownership, scope, loanId, installmentId);
 
   @override
   String toString() =>
       'NotificationTarget(${destination.name}, goal: $goalId, '
-      'ownership: $ownership, scope: $scope)';
+      'ownership: $ownership, scope: $scope, loan: $loanId, '
+      'installment: $installmentId)';
 }
 
 /// Whether the system lets MoneyMate show notifications.
@@ -254,9 +294,45 @@ abstract class PushMessaging {
   Stream<Map<String, String>> get taps;
 }
 
+/// A notification to show later, at [fireAt] (local wall-clock time).
+@immutable
+class ScheduledNotification {
+  const ScheduledNotification({
+    required this.id,
+    required this.fireAt,
+    required this.notification,
+  });
+
+  /// Stable ID: scheduling the same ID again replaces the earlier one.
+  final int id;
+  final DateTime fireAt;
+  final AppNotification notification;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ScheduledNotification &&
+      other.id == id &&
+      other.fireAt == fireAt &&
+      other.notification == notification;
+
+  @override
+  int get hashCode => Object.hash(id, fireAt, notification);
+}
+
 /// Shows notifications on this device (flutter_local_notifications).
 abstract class LocalNotifier {
   Future<void> show(AppNotification notification);
+
+  /// Schedules [notification]; one with the same ID is replaced. Works
+  /// without a connection and while the app is closed; the system keeps it
+  /// across restarts.
+  Future<void> schedule(ScheduledNotification notification);
+
+  /// Cancels a scheduled notification (nothing happens when there is none).
+  Future<void> cancelScheduled(int id);
+
+  /// IDs of scheduled, not yet shown notifications of [channel].
+  Future<Set<int>> scheduledIds(NotificationChannel channel);
 
   /// [AppNotification.tapData] of the notification whose tap started the
   /// app, if one did.
@@ -478,6 +554,63 @@ class SystemLocalNotifier implements LocalNotifier {
     );
   }
 
+  static NotificationDetails _details(AppNotification n) => NotificationDetails(
+    android: AndroidNotificationDetails(
+      n.channel.id,
+      n.channel.label,
+      channelDescription: n.channel.description,
+      importance: Importance.high,
+      priority: Priority.high,
+      tag: n.tag,
+      color: _accent,
+      styleInformation: BigTextStyleInformation(n.body),
+    ),
+    iOS: DarwinNotificationDetails(threadIdentifier: n.channel.id),
+    macOS: DarwinNotificationDetails(threadIdentifier: n.channel.id),
+  );
+
+  @override
+  Future<void> schedule(ScheduledNotification s) async {
+    if (!await _init()) return;
+    final n = s.notification;
+    // Scheduled as an instant in UTC, worked out from the local wall-clock
+    // time when scheduling. Reminders are planned again whenever the app
+    // starts or resumes, so a new time zone or a daylight-saving change is
+    // picked up then.
+    await _plugin.zonedSchedule(
+      id: s.id,
+      title: n.title,
+      body: n.body,
+      scheduledDate: tz.TZDateTime.from(s.fireAt.toUtc(), tz.UTC),
+      notificationDetails: _details(n),
+      // Inexact: no exact-alarm permission is needed, and a reminder a few
+      // minutes late is fine.
+      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      payload: jsonEncode(n.tapData),
+    );
+  }
+
+  @override
+  Future<void> cancelScheduled(int id) async {
+    if (!await _init()) return;
+    await _plugin.cancel(id: id);
+  }
+
+  @override
+  Future<Set<int>> scheduledIds(NotificationChannel channel) async {
+    if (!await _init()) return const {};
+    try {
+      final pending = await _plugin.pendingNotificationRequests();
+      return {
+        for (final p in pending)
+          if (decodeTapPayload(p.payload)?['channel'] == channel.id) p.id,
+      };
+    } catch (e) {
+      debugPrint('Scheduled notifications unavailable: $e');
+      return const {};
+    }
+  }
+
   @override
   Future<Map<String, String>?> launchTap() async {
     if (!await _init()) return null;
@@ -518,6 +651,15 @@ class NoopLocalNotifier implements LocalNotifier {
 
   @override
   Future<void> show(AppNotification notification) async {}
+
+  @override
+  Future<void> schedule(ScheduledNotification notification) async {}
+
+  @override
+  Future<void> cancelScheduled(int id) async {}
+
+  @override
+  Future<Set<int>> scheduledIds(NotificationChannel channel) async => const {};
 
   @override
   Future<Map<String, String>?> launchTap() async => null;

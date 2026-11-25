@@ -12,6 +12,7 @@ import 'package:money_mate/providers/auth_provider.dart';
 import 'package:money_mate/providers/budget_provider.dart';
 import 'package:money_mate/providers/category_provider.dart';
 import 'package:money_mate/providers/household_provider.dart';
+import 'package:money_mate/providers/loan_provider.dart';
 import 'package:money_mate/providers/savings_provider.dart';
 import 'package:money_mate/providers/transaction_provider.dart';
 
@@ -90,6 +91,8 @@ class SyncProvider extends ChangeNotifier with WidgetsBindingObserver {
   int? _seenBudgetVersion;
   int? _seenSavingsVersion;
   int? _seenSavingsRequest;
+  LoanProvider? _loans;
+  int? _seenLoanVersion;
   int? _seenReleaseToken;
   HouseholdReleaseResult? _lastRelease;
 
@@ -167,6 +170,24 @@ class SyncProvider extends ChangeNotifier with WidgetsBindingObserver {
         if (_pendingCount > 0) return SyncStatusLabel.pending;
         return SyncStatusLabel.synced;
     }
+  }
+
+  /// Uploads lending changes made on this device shortly after they
+  /// happen (like transactions and savings).
+  void watchLoans(LoanProvider loans) {
+    _loans?.removeListener(_onLoansChanged);
+    _loans = loans;
+    _seenLoanVersion = loans.localChangeVersion;
+    loans.addListener(_onLoansChanged);
+  }
+
+  void _onLoansChanged() {
+    final version = _loans?.localChangeVersion;
+    if (version == _seenLoanVersion) return;
+    _seenLoanVersion = version;
+    if (_service == null || _uid == null || _disposed) return;
+    _debounce?.cancel();
+    _debounce = Timer(changeDebounce, syncNow);
   }
 
   void updateDependencies(
@@ -368,6 +389,9 @@ class SyncProvider extends ChangeNotifier with WidgetsBindingObserver {
         _seenDataVersion = transactions.dataVersion;
         await reload;
       }
+    } else if (result.report.loansUploaded > 0) {
+      // Repayments confirmed by the cloud are no longer "pending".
+      await _loans?.load();
     }
     await _refreshCounts();
 
@@ -456,6 +480,7 @@ class SyncProvider extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void dispose() {
     _disposed = true;
+    _loans?.removeListener(_onLoansChanged);
     _debounce?.cancel();
     _periodic?.cancel();
     _connectivitySub?.cancel();

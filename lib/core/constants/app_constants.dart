@@ -9,7 +9,7 @@ class AppConstants {
   static const String appTagline = 'Offline-first personal expense tracker';
 
   static const String databaseName = 'money_mate.db';
-  static const int databaseVersion = 6;
+  static const int databaseVersion = 7;
 
   /// Version of the JSON backup format. Bump when the structure changes.
   static const int backupSchemaVersion = 1;
@@ -124,6 +124,24 @@ class SyncKeys {
   /// / 'savings_entries'), or of one shared goal's entries; [part] is
   /// 'micros' or 'doc_id'. Matches `sync.%.pull_cursor_%`.
   static String householdSavingsCursor(
+    String householdId,
+    String collection,
+    String part,
+  ) => 'sync.household:$householdId.$collection.pull_cursor_$part';
+
+  /// Pull position of the personal lending [collection] ('loans',
+  /// 'loanRepayments', 'loanReminders'); [part] is 'micros' or 'doc_id'.
+  /// Matches `sync.%.pull_cursor_%`, so Reset App forgets it.
+  static String personalLoansCursor(String collection, String part) =>
+      '$personalLoansPrefix$collection.pull_cursor_$part';
+
+  /// Prefix of every personal lending cursor key.
+  static const String personalLoansPrefix = 'sync.personal_loans.';
+
+  /// Pull position of a household's lending [collection]. Starts with
+  /// `sync.household:<id>.`, so it is forgotten when the household is
+  /// released.
+  static String householdLoansCursor(
     String householdId,
     String collection,
     String part,

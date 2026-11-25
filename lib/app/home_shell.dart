@@ -8,6 +8,7 @@ import 'package:money_mate/core/utils/date_range.dart';
 import 'package:money_mate/features/budget/screens/budget_screen.dart';
 import 'package:money_mate/features/dashboard/screens/dashboard_screen.dart';
 import 'package:money_mate/features/household/widgets/household_widgets.dart';
+import 'package:money_mate/features/lending/lending_actions.dart';
 import 'package:money_mate/features/reports/screens/reports_screen.dart';
 import 'package:money_mate/features/savings/savings_actions.dart';
 import 'package:money_mate/features/settings/screens/settings_screen.dart';
@@ -18,6 +19,7 @@ import 'package:money_mate/models/savings_model.dart';
 import 'package:money_mate/models/scope_models.dart';
 import 'package:money_mate/providers/budget_provider.dart';
 import 'package:money_mate/providers/dashboard_provider.dart';
+import 'package:money_mate/providers/loan_provider.dart';
 import 'package:money_mate/providers/notification_provider.dart';
 import 'package:money_mate/providers/recurring_provider.dart';
 import 'package:money_mate/providers/report_provider.dart';
@@ -101,6 +103,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     context.read<RecurringProvider>().runDue();
     // Notifications may have been allowed in the system settings meanwhile.
     context.read<NotificationProvider>().refreshPermission();
+    // Repayment statuses depend on the date, and reminders on the time zone
+    // and daylight-saving offset, which may have changed meanwhile.
+    context.read<LoanProvider>().refreshForNow();
     final today = PeriodUtils.dateOnly(DateTime.now());
     if (today == _lastActiveDay) return;
     _lastActiveDay = today;
@@ -140,6 +145,16 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         );
       case NotificationDestination.goal:
         openGoalDetailsById(context, target.goalId!);
+      case NotificationDestination.lending:
+        openLendingScreen(context);
+      case NotificationDestination.loan:
+        // Opens the record with the instalment and its unpaid amount; a
+        // repayment is only recorded if the user adds one.
+        openLoanDetails(
+          context,
+          target.loanId!,
+          installmentId: target.installmentId,
+        );
     }
   }
 

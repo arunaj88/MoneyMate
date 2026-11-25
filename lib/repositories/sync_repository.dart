@@ -749,6 +749,9 @@ class SqliteLocalSyncStore implements LocalSyncStore {
         where: "ownership = 'household' AND household_id = ?",
         whereArgs: [householdId],
       );
+      // The household's loans, repayments and reminder settings (cached
+      // copies; the cloud keeps them for the household).
+      await deleteLoansOf(txn, householdId);
       for (final key in [
         SyncKeys.cursorMicros(scope),
         SyncKeys.cursorDocId(scope),
@@ -818,6 +821,7 @@ class SqliteLocalSyncStore implements LocalSyncStore {
           where: "ownership = 'household' AND household_id = ?",
           whereArgs: [householdId],
         );
+        await deleteLoansOf(txn, householdId);
         final scope = DataScope.household(householdId);
         await txn.delete(
           Tables.appSettings,
@@ -874,6 +878,14 @@ class SqliteLocalSyncStore implements LocalSyncStore {
         where: "ownership = 'personal'${older('updated_at')}",
         whereArgs: args(),
       );
+      // Personal lending only. Instalments, repayments and settings go with
+      // their loan.
+      await txn.delete(
+        Tables.loans,
+        where: "household_id = ''${older('updated_at')}",
+        whereArgs: args(),
+      );
+      await deleteOrphanedLoanRows(txn);
       // Custom personal categories, unless remaining (shared) records use
       // them.
       await txn.rawDelete(
@@ -915,6 +927,11 @@ class SqliteLocalSyncStore implements LocalSyncStore {
           'alert.h.%',
         ],
       );
+      await txn.delete(
+        Tables.appSettings,
+        where: 'key LIKE ?',
+        whereArgs: ['${SyncKeys.personalLoansPrefix}%'],
+      );
       await txn.insert(Tables.appSettings, {
         'key': SyncKeys.personalResetAt,
         'value': resetAt.millisecondsSinceEpoch.toString(),
@@ -938,6 +955,10 @@ class SqliteLocalSyncStore implements LocalSyncStore {
         Tables.savingsEntries,
         Tables.savingsMembers,
         Tables.savingsInvitations,
+        Tables.loans,
+        Tables.loanInstallments,
+        Tables.loanRepayments,
+        Tables.loanReminders,
       ]) {
         await txn.delete(table);
       }
@@ -987,4 +1008,31 @@ int parseRetentionDays(String? value) {
     return AppConstants.defaultLocalRetentionDays;
   }
   return days;
+}
+
+/// Removes [householdId]'s loans with their schedules, repayments and
+/// reminder settings from this device (cached copies of the household's
+/// cloud data).
+Future<void> deleteLoansOf(DatabaseExecutor db, String householdId) async {
+  await db.delete(
+    Tables.loans,
+    where: 'household_id = ?',
+    whereArgs: [householdId],
+  );
+  await deleteOrphanedLoanRows(db);
+}
+
+/// Removes instalments, repayments and reminder settings whose loan is no
+/// longer on this device.
+Future<void> deleteOrphanedLoanRows(DatabaseExecutor db) async {
+  for (final table in [
+    Tables.loanInstallments,
+    Tables.loanRepayments,
+    Tables.loanReminders,
+  ]) {
+    await db.rawDelete(
+      'DELETE FROM $table WHERE loan_id NOT IN '
+      '(SELECT id FROM ${Tables.loans})',
+    );
+  }
 }

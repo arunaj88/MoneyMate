@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:money_mate/core/database/app_database.dart';
 import 'package:money_mate/core/services/auth_service.dart';
 import 'package:money_mate/core/services/backup_service.dart';
+import 'package:money_mate/core/services/cloud_loan_store.dart';
 import 'package:money_mate/core/services/cloud_savings_store.dart';
 import 'package:money_mate/core/services/cloud_history_loader.dart';
 import 'package:money_mate/core/services/cloud_transaction_store.dart';
@@ -21,6 +22,7 @@ import 'package:money_mate/core/services/transaction_sync_service.dart';
 import 'package:money_mate/repositories/app_settings_repository.dart';
 import 'package:money_mate/repositories/budget_repository.dart';
 import 'package:money_mate/repositories/category_repository.dart';
+import 'package:money_mate/repositories/loan_repository.dart';
 import 'package:money_mate/repositories/recurring_repository.dart';
 import 'package:money_mate/repositories/savings_repository.dart';
 import 'package:money_mate/repositories/settings_sync_repository.dart';
@@ -42,6 +44,7 @@ class AccountData {
     this.dataResetService,
     this.recurringRepository,
     this.savingsRepository,
+    this.loanRepository,
   });
 
   /// Opens [uid]'s database and wires the SQLite-backed implementations.
@@ -49,9 +52,11 @@ class AccountData {
     String uid, {
     required AuthService authService,
     required CloudSavingsStore savingsCloud,
+    CloudLoanStore? loansCloud,
   }) async {
     final database = await AppDatabase.openForAccount(uid);
     final savings = SqliteSavingsRepository(database);
+    final loans = SqliteLoanRepository(database);
     final syncService = TransactionSyncService(
       local: SqliteLocalSyncStore(database),
       cloud: FirestoreTransactionStore(),
@@ -59,6 +64,8 @@ class AccountData {
       records: FirestoreRecordStore(),
       savingsLocal: savings,
       savingsCloud: savingsCloud,
+      loansLocal: loans,
+      loansCloud: loansCloud,
     );
     return AccountData(
       transactionRepository: SqliteTransactionRepository(database),
@@ -71,6 +78,7 @@ class AccountData {
       dataResetService: SyncDataResetService(syncService),
       recurringRepository: SqliteRecurringRepository(database),
       savingsRepository: savings,
+      loanRepository: loans,
     );
   }
 
@@ -93,6 +101,9 @@ class AccountData {
 
   /// Savings goals; null hides the savings feature.
   final SavingsRepository? savingsRepository;
+
+  /// Money lent (loans given); null hides the lending feature.
+  final LoanRepository? loanRepository;
 }
 
 /// Opens the data of the account with the given UID.
@@ -109,6 +120,7 @@ class AppDependencies {
     this.connectivity,
     this.householdService,
     this.savingsCloud,
+    this.loansCloud,
     this.profilePhotoService,
     this.photoPicker,
     this.pushMessaging,
@@ -132,17 +144,20 @@ class AppDependencies {
     // Android channels exist before the first push arrives.
     unawaited(localNotifier?.prepare());
     final savingsCloud = FirestoreSavingsStore();
+    final loansCloud = FirestoreLoanStore();
     return AppDependencies(
       preferences: prefs,
       openAccount: (uid) => AccountData.open(
         uid,
         authService: authService,
         savingsCloud: savingsCloud,
+        loansCloud: loansCloud,
       ),
       authService: authService,
       connectivity: ConnectivityPlusMonitor(),
       householdService: FirebaseHouseholdService(),
       savingsCloud: savingsCloud,
+      loansCloud: loansCloud,
       profilePhotoService: FirebaseProfilePhotoService(),
       photoPicker: ImagePickerPhotoPicker(),
       pushMessaging: FirebasePushMessaging.isSupported
@@ -167,6 +182,10 @@ class AppDependencies {
   /// Household and shared savings in the cloud; null keeps savings
   /// personal-only (widget tests).
   final CloudSavingsStore? savingsCloud;
+
+  /// Lending in the cloud (used to void repayments); null keeps lending
+  /// on the device (widget tests).
+  final CloudLoanStore? loansCloud;
 
   /// Profile photo storage; null hides "Change photo".
   final ProfilePhotoService? profilePhotoService;

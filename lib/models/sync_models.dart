@@ -405,6 +405,20 @@ class SyncReport {
   /// access (removed, left or the goal was deleted).
   int sharedGoalsReleased = 0;
 
+  /// Loans, repayments and reminder settings uploaded.
+  int loansUploaded = 0;
+
+  /// Lending documents applied locally from the cloud.
+  int loansDownloaded = 0;
+
+  /// Repayments the cloud refused because the loan had meanwhile been
+  /// repaid by repayments recorded elsewhere.
+  int repaymentsRejected = 0;
+
+  /// True when the cloud refused access to a lending collection (rules not
+  /// deployed yet); lending stays on this device until it is allowed.
+  bool loansUnavailable = false;
+
   /// Households whose cloud data could not be read because this user is no
   /// longer an active member.
   final Set<String> householdsDenied = {};
@@ -431,7 +445,9 @@ class SyncReport {
       categoriesDownloaded > 0 ||
       budgetsDownloaded > 0 ||
       savingsDownloaded > 0 ||
-      sharedGoalsReleased > 0;
+      sharedGoalsReleased > 0 ||
+      loansDownloaded > 0 ||
+      repaymentsRejected > 0;
 
   void addAll(SyncReport other) {
     uploaded += other.uploaded;
@@ -448,6 +464,10 @@ class SyncReport {
     savingsDownloaded += other.savingsDownloaded;
     savingsUnavailable |= other.savingsUnavailable;
     sharedGoalsReleased += other.sharedGoalsReleased;
+    loansUploaded += other.loansUploaded;
+    loansDownloaded += other.loansDownloaded;
+    repaymentsRejected += other.repaymentsRejected;
+    loansUnavailable |= other.loansUnavailable;
     householdsDenied.addAll(other.householdsDenied);
     resetApplied |= other.resetApplied;
     restorePending |= other.restorePending;
@@ -462,5 +482,6 @@ class SyncReport {
       'archivedLocally: $archivedLocally, budgetsDownloaded: '
       '$budgetsDownloaded, categoriesDownloaded: $categoriesDownloaded, '
       'savingsUploaded: $savingsUploaded, savingsDownloaded: '
-      '$savingsDownloaded)';
+      '$savingsDownloaded, loansUploaded: $loansUploaded, loansDownloaded: '
+      '$loansDownloaded)';
 }

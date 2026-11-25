@@ -1007,4 +1007,336 @@ test.describe('firestore.rules', { skip }, () => {
     await assertFails(db(PARTNER).doc(path).set(budgetAlert(PARTNER, id)));
     await assertFails(db(OWNER).doc(path).delete());
   });
+
+  // ------------------------------------------------------------ lending
+
+  /** A loan exactly as Loan.toCloudMap + FirestoreLoanStore write it. */
+  function loanDoc(id, uid, extra = {}) {
+    return {
+      borrowerName: 'John',
+      borrowerPhone: '',
+      borrowerEmail: '',
+      principalMinor: 100000,
+      interestRateBp: 0,
+      interestMinor: 0,
+      totalOwedMinor: 100000,
+      lentDate: 1_700_000_000_000,
+      repaymentType: 'oneTime',
+      installmentMinor: null,
+      firstDueDate: null,
+      dueDay: null,
+      endDate: null,
+      dueDate: 1_710_000_000_000,
+      notes: '',
+      schedule: [
+        { id: `${id}-1`, number: 1, dueDate: 1_710_000_000_000, expectedMinor: 100000 },
+      ],
+      createdAt: 1_700_000_000_000,
+      createdBy: uid,
+      createdByName: 'Someone',
+      id,
+      updatedAt: 1_700_000_000_000,
+      deleted: false,
+      updatedBy: uid,
+      serverUpdatedAt: now(),
+      ...extra,
+    };
+  }
+
+  function repaymentDoc(id, loanId, uid, amount, extra = {}) {
+    return {
+      loanId,
+      amountMinor: amount,
+      date: 1_705_000_000_000,
+      method: 'cash',
+      note: '',
+      installmentId: `${loanId}-1`,
+      createdAt: 1_705_000_000_000,
+      userUid: uid,
+      userName: 'Someone',
+      voided: false,
+      voidedAt: null,
+      voidedBy: null,
+      voidReason: '',
+      id,
+      updatedAt: 1_705_000_000_000,
+      deleted: false,
+      serverUpdatedAt: now(),
+      ...extra,
+    };
+  }
+
+  function remindersDoc(loanId, uid, notifyUids, extra = {}) {
+    return {
+      loanId,
+      enabled: true,
+      paused: false,
+      offsets: [-3, 0, 1, 3, 7],
+      notifyUids,
+      updatedBy: uid,
+      id: loanId,
+      updatedAt: 1_700_000_000_000,
+      deleted: false,
+      serverUpdatedAt: now(),
+      ...extra,
+    };
+  }
+
+  /** A repayment and the loan's new total, in one batch (like the app's
+   * transaction). */
+  function repay(client, base, loanId, repayment, newTotal) {
+    const batch = client.batch();
+    batch.set(client.doc(`${base}/loanRepayments/${repayment.id}`), repayment);
+    batch.update(client.doc(`${base}/loans/${loanId}`), {
+      receivedMinor: newTotal,
+      lastRepaymentId: repayment.id,
+      lastRepaymentOp: 'add',
+    });
+    return batch.commit();
+  }
+
+  function voidRepayment(client, base, loanId, repaymentId, uid, newTotal) {
+    const batch = client.batch();
+    batch.update(client.doc(`${base}/loanRepayments/${repaymentId}`), {
+      voided: true,
+      voidedAt: 1_706_000_000_000,
+      voidedBy: uid,
+      voidReason: 'Entered twice',
+      updatedAt: 1_706_000_000_000,
+      serverUpdatedAt: now(),
+    });
+    batch.update(client.doc(`${base}/loans/${loanId}`), {
+      receivedMinor: newTotal,
+      lastRepaymentId: repaymentId,
+      lastRepaymentOp: 'void',
+    });
+    return batch.commit();
+  }
+
+  test('personal lending is private; totals move only with repayments', async () => {
+    const base = `users/${OWNER}`;
+    const loan = `${base}/loans/l1`;
+    await assertFails(db(STRANGER).doc(loan).set(loanDoc('l1', STRANGER)));
+    await assertFails(db(null).doc(loan).set(loanDoc('l1', OWNER)));
+    // Cannot start repaid, owe a different total, or claim a household.
+    await assertFails(
+      db(OWNER).doc(loan).set(loanDoc('l1', OWNER, { receivedMinor: 10 })),
+    );
+    await assertFails(
+      db(OWNER).doc(loan).set(loanDoc('l1', OWNER, { totalOwedMinor: 1 })),
+    );
+    await assertFails(
+      db(OWNER).doc(loan).set(loanDoc('l1', OWNER, { householdId: HID })),
+    );
+    await assertFails(
+      db(OWNER).doc(loan).set(loanDoc('l1', OWNER, { principalMinor: 0, totalOwedMinor: 0 })),
+    );
+    await assertSucceeds(
+      db(OWNER).doc(loan).set(loanDoc('l1', OWNER), { merge: true }),
+    );
+    await assertSucceeds(db(OWNER).doc(loan).get());
+    await assertFails(db(STRANGER).doc(loan).get());
+
+    // A repayment with the matching new total.
+    await assertSucceeds(
+      repay(db(OWNER), base, 'l1', repaymentDoc('r1', 'l1', OWNER, 30000), 30000),
+    );
+    // Wrong total, another user's name, re-using an ID, or more than owed.
+    await assertFails(
+      repay(db(OWNER), base, 'l1', repaymentDoc('r2', 'l1', OWNER, 100), 999),
+    );
+    await assertFails(
+      repay(db(OWNER), base, 'l1', repaymentDoc('r3', 'l1', STRANGER, 100), 30100),
+    );
+    await assertFails(
+      repay(db(OWNER), base, 'l1', repaymentDoc('r1', 'l1', OWNER, 100), 30100),
+    );
+    await assertFails(
+      repay(db(OWNER), base, 'l1', repaymentDoc('r4', 'l1', OWNER, 70001), 100001),
+    );
+    // Neither the repayment alone nor the total alone.
+    await assertFails(
+      db(OWNER).doc(`${base}/loanRepayments/r5`).set(repaymentDoc('r5', 'l1', OWNER, 10)),
+    );
+    await assertFails(db(OWNER).doc(loan).update({ receivedMinor: 100000 }));
+    // Repayments are never edited or deleted.
+    await assertFails(
+      db(OWNER).doc(`${base}/loanRepayments/r1`).update({ amountMinor: 1 }),
+    );
+    await assertFails(db(OWNER).doc(`${base}/loanRepayments/r1`).delete());
+
+    // Edits keep the total and can never owe less than was repaid.
+    await assertSucceeds(
+      db(OWNER).doc(loan).set(
+        { borrowerName: 'John Smith', updatedAt: 2, updatedBy: OWNER, serverUpdatedAt: now() },
+        { merge: true },
+      ),
+    );
+    await assertFails(
+      db(OWNER).doc(loan).set(
+        { principalMinor: 20000, totalOwedMinor: 20000, updatedAt: 3, serverUpdatedAt: now() },
+        { merge: true },
+      ),
+    );
+    await assertFails(
+      db(OWNER).doc(loan).set(
+        { receivedMinor: 0, updatedAt: 3, serverUpdatedAt: now() },
+        { merge: true },
+      ),
+    );
+
+    // Voiding lowers the total by the repayment's amount, once.
+    await assertFails(voidRepayment(db(OWNER), base, 'l1', 'r1', OWNER, 10));
+    await assertFails(voidRepayment(db(OWNER), base, 'l1', 'r1', STRANGER, 0));
+    await assertSucceeds(voidRepayment(db(OWNER), base, 'l1', 'r1', OWNER, 0));
+    await assertFails(voidRepayment(db(OWNER), base, 'l1', 'r1', OWNER, -30000));
+
+    // Soft deletion, and a tombstone for a loan never uploaded.
+    await assertSucceeds(
+      db(OWNER).doc(loan).set(
+        { id: 'l1', deleted: true, deletedAt: 4, updatedAt: 4, updatedBy: OWNER, serverUpdatedAt: now() },
+        { merge: true },
+      ),
+    );
+    await assertSucceeds(
+      db(OWNER).doc(`${base}/loans/never`).set(
+        { id: 'never', deleted: true, deletedAt: 4, updatedAt: 4, updatedBy: OWNER, serverUpdatedAt: now() },
+        { merge: true },
+      ),
+    );
+    await assertFails(db(OWNER).doc(loan).delete());
+    // No repayments for a deleted loan.
+    await assertFails(
+      repay(db(OWNER), base, 'l1', repaymentDoc('r6', 'l1', OWNER, 10), 10),
+    );
+
+    // Reminder settings: owner only.
+    const reminders = `${base}/loanReminders/l1`;
+    await assertSucceeds(db(OWNER).doc(reminders).set(remindersDoc('l1', OWNER, [])));
+    await assertFails(db(STRANGER).doc(reminders).get());
+    await assertFails(
+      db(STRANGER).doc(`users/${STRANGER}/loanReminders/l1`).set(
+        remindersDoc('l1', OWNER, []),
+      ),
+    );
+  });
+
+  test('household lending: members record loans and repayments', async () => {
+    const base = `households/${HID}`;
+    const loan = `${base}/loans/h1`;
+    const household = (uid, extra = {}) =>
+      loanDoc('h1', uid, { householdId: HID, ...extra });
+
+    await assertFails(db(STRANGER).doc(loan).set(household(STRANGER)));
+    await assertFails(db(REMOVED).doc(loan).set(household(REMOVED)));
+    // The creator and editor must be the caller.
+    await assertFails(db(PARTNER).doc(loan).set(household(OWNER)));
+    await assertSucceeds(
+      db(PARTNER).doc(loan).set(household(PARTNER), { merge: true }),
+    );
+    await assertSucceeds(db(OWNER).doc(loan).get());
+    await assertFails(db(STRANGER).doc(loan).get());
+    await assertFails(db(REMOVED).doc(loan).get());
+
+    // Any active member records a repayment, attributed to themselves.
+    await assertSucceeds(
+      repay(db(OWNER), base, 'h1', repaymentDoc('r1', 'h1', OWNER, 40000), 40000),
+    );
+    await assertFails(
+      repay(db(STRANGER), base, 'h1', repaymentDoc('r2', 'h1', STRANGER, 100), 40100),
+    );
+    await assertFails(
+      repay(db(PARTNER), base, 'h1', repaymentDoc('r3', 'h1', OWNER, 100), 40100),
+    );
+    // A stale concurrent write computed from an old total is refused.
+    await assertFails(
+      repay(db(PARTNER), base, 'h1', repaymentDoc('r4', 'h1', PARTNER, 60000), 60000),
+    );
+    await assertSucceeds(
+      repay(db(PARTNER), base, 'h1', repaymentDoc('r4', 'h1', PARTNER, 60000), 100000),
+    );
+    // Paid in full: nothing more fits.
+    await assertFails(
+      repay(db(PARTNER), base, 'h1', repaymentDoc('r5', 'h1', PARTNER, 1), 100001),
+    );
+    await assertSucceeds(db(PARTNER).doc(`${base}/loanRepayments/r1`).get());
+    await assertFails(db(REMOVED).doc(`${base}/loanRepayments/r1`).get());
+
+    // Edits by any member keep the creator; only the creator or the owner
+    // deletes.
+    await assertSucceeds(
+      db(OWNER).doc(loan).set(
+        { notes: 'Car repair', updatedAt: 2, updatedBy: OWNER, serverUpdatedAt: now() },
+        { merge: true },
+      ),
+    );
+    await assertFails(
+      db(OWNER).doc(loan).set(
+        { createdBy: OWNER, updatedAt: 3, updatedBy: OWNER, serverUpdatedAt: now() },
+        { merge: true },
+      ),
+    );
+    const ownersLoan = `${base}/loans/h2`;
+    await assertSucceeds(
+      db(OWNER).doc(ownersLoan).set(loanDoc('h2', OWNER, { householdId: HID })),
+    );
+    const deletion = (uid) => ({
+      id: 'h2', deleted: true, deletedAt: 5, updatedAt: 5, updatedBy: uid, serverUpdatedAt: now(),
+    });
+    await assertFails(db(PARTNER).doc(ownersLoan).set(deletion(PARTNER), { merge: true }));
+    await assertSucceeds(db(OWNER).doc(ownersLoan).set(deletion(OWNER), { merge: true }));
+    await assertSucceeds(
+      db(OWNER).doc(loan).set(
+        { id: 'h1', deleted: true, deletedAt: 6, updatedAt: 6, updatedBy: OWNER, serverUpdatedAt: now() },
+        { merge: true },
+      ),
+    );
+  });
+
+  test('household reminder recipients: the owner decides', async () => {
+    const path = `households/${HID}/loanReminders/h1`;
+    // A member recording a loan may only name the owner.
+    await assertFails(
+      db(PARTNER).doc(path).set(remindersDoc('h1', PARTNER, [PARTNER])),
+    );
+    await assertFails(
+      db(PARTNER).doc(path).set(remindersDoc('h1', PARTNER, [OWNER, PARTNER])),
+    );
+    await assertFails(
+      db(STRANGER).doc(path).set(remindersDoc('h1', STRANGER, [OWNER])),
+    );
+    await assertSucceeds(
+      db(PARTNER).doc(path).set(remindersDoc('h1', PARTNER, [OWNER])),
+    );
+    // Members cannot add themselves (or pause) afterwards.
+    await assertFails(
+      db(PARTNER).doc(path).set(
+        remindersDoc('h1', PARTNER, [OWNER, PARTNER], { updatedAt: 2 }),
+      ),
+    );
+    await assertFails(
+      db(PARTNER).doc(path).set(
+        remindersDoc('h1', PARTNER, [OWNER], { paused: true, updatedAt: 2 }),
+      ),
+    );
+    // Nor impersonate the owner.
+    await assertFails(
+      db(PARTNER).doc(path).set(
+        remindersDoc('h1', OWNER, [OWNER, PARTNER], { updatedAt: 2 }),
+      ),
+    );
+    // The owner selects, deselects, or turns everyone off.
+    await assertSucceeds(
+      db(OWNER).doc(path).set(
+        remindersDoc('h1', OWNER, [OWNER, PARTNER], { updatedAt: 3 }),
+      ),
+    );
+    await assertSucceeds(
+      db(OWNER).doc(path).set(remindersDoc('h1', OWNER, [], { updatedAt: 4 })),
+    );
+    await assertSucceeds(db(PARTNER).doc(path).get());
+    await assertFails(db(REMOVED).doc(path).get());
+    await assertFails(db(STRANGER).doc(path).get());
+    await assertFails(db(OWNER).doc(path).delete());
+  });
 });
