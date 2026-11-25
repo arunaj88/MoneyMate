@@ -145,6 +145,9 @@ class _TransactionList extends StatelessWidget {
         child: ErrorState(message: provider.error!, onRetry: provider.load),
       );
     }
+    if (provider.transactions.isEmpty && isViewLoading(context)) {
+      return const LoadingView();
+    }
     if (provider.transactions.isEmpty) {
       final empty = provider.filter.isEmpty
           ? EmptyState(

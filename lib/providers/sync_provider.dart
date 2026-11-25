@@ -120,6 +120,36 @@ class SyncProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// What happened when household access last ended on this device.
   HouseholdReleaseResult? get lastRelease => _lastRelease;
 
+  /// Households a sync cycle has completed for since start-up.
+  final Set<String> _householdsChecked = {};
+
+  /// True while the current household's shared data has not been fetched
+  /// yet in this app run and a sync is running or about to run, so the
+  /// household view can say it is loading instead of looking empty.
+  bool get isFetchingHousehold {
+    final householdId = _householdId;
+    if (householdId == null || _householdsChecked.contains(householdId)) {
+      return false;
+    }
+    return _syncDue;
+  }
+
+  /// True while this device has never finished a sync for the account
+  /// (e.g. the first sign-in on a phone) and one is running or about to
+  /// run, so the personal view can say it is loading instead of looking
+  /// empty.
+  bool get isFetchingPersonal =>
+      _statusLoaded && _lastSyncedAt == null && _syncDue;
+
+  /// Whether the sync status has been read from the device yet.
+  bool _statusLoaded = false;
+
+  /// A sync cycle is running, or is about to start.
+  bool get _syncDue {
+    if (_paused || !_online || _uid == null) return false;
+    return _phase == SyncPhase.syncing || _phase == SyncPhase.idle;
+  }
+
   /// Synced / Syncing / Offline / Pending / Failed.
   SyncStatusLabel get statusLabel {
     switch (_phase) {
@@ -316,9 +346,15 @@ class SyncProvider extends ChangeNotifier with WidgetsBindingObserver {
     _message = null;
     _setPhase(SyncPhase.syncing);
 
-    final result = await service.synchronize(uid, householdId: _householdId);
+    final householdId = _householdId;
+    final result = await service.synchronize(uid, householdId: householdId);
     if (_disposed) return;
     _lastReport = result.report;
+    // Even when access was refused: the household view stops loading and
+    // shows what is on the device.
+    if (householdId != null && result.outcome == SyncOutcome.completed) {
+      _householdsChecked.add(householdId);
+    }
     for (final denied in result.report.householdsDenied) {
       // Only released once the server confirms the membership ended.
       unawaited(_household?.confirmAccess(denied));
@@ -402,6 +438,7 @@ class SyncProvider extends ChangeNotifier with WidgetsBindingObserver {
       _failedCount = counts.failed;
       _lastSyncedAt = await service.lastSyncedAt();
       _retentionDays = (await service.retentionPolicy()).days;
+      _statusLoaded = true;
     } catch (e) {
       debugPrint('Could not read sync status: $e');
     }

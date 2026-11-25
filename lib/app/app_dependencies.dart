@@ -27,50 +27,31 @@ import 'package:money_mate/repositories/settings_sync_repository.dart';
 import 'package:money_mate/repositories/sync_repository.dart';
 import 'package:money_mate/repositories/transaction_repository.dart';
 
-/// Long-lived services created once at start-up and injected through
-/// MultiProvider. Tests construct this with in-memory fakes.
-class AppDependencies {
-  const AppDependencies({
-    required this.preferences,
+/// The repositories and services backed by one account's on-device
+/// database. Each signed-in account gets its own, so accounts sharing a
+/// device never see each other's data.
+class AccountData {
+  const AccountData({
     required this.transactionRepository,
     required this.categoryRepository,
     required this.budgetRepository,
     required this.appSettingsRepository,
     required this.backupService,
-    required this.authService,
-    this.fileService = const FileService(),
     this.syncService,
     this.historySource,
-    this.connectivity,
-    this.householdService,
     this.dataResetService,
     this.recurringRepository,
     this.savingsRepository,
-    this.savingsCloud,
-    this.profilePhotoService,
-    this.photoPicker,
-    this.pushMessaging,
-    this.localNotifier = const NoopLocalNotifier(),
-    this.notificationCloud,
   });
 
-  /// Opens the database and wires the SQLite-backed implementations.
-  static Future<AppDependencies> create() async {
-    final database = await AppDatabase.open();
-    final prefs = await SharedPreferences.getInstance();
-    // SQLite is the offline store; Firestore's own cache is not needed and
-    // every sync read must come from the server.
-    FirebaseFirestore.instance.settings = const Settings(
-      persistenceEnabled: false,
-    );
-    final authService = FirebaseAuthService();
+  /// Opens [uid]'s database and wires the SQLite-backed implementations.
+  static Future<AccountData> open(
+    String uid, {
+    required AuthService authService,
+    required CloudSavingsStore savingsCloud,
+  }) async {
+    final database = await AppDatabase.openForAccount(uid);
     final savings = SqliteSavingsRepository(database);
-    final savingsCloud = FirestoreSavingsStore();
-    final localNotifier = SystemLocalNotifier.isSupported
-        ? SystemLocalNotifier()
-        : null;
-    // Android channels exist before the first push arrives.
-    unawaited(localNotifier?.prepare());
     final syncService = TransactionSyncService(
       local: SqliteLocalSyncStore(database),
       cloud: FirestoreTransactionStore(),
@@ -79,21 +60,88 @@ class AppDependencies {
       savingsLocal: savings,
       savingsCloud: savingsCloud,
     );
-    return AppDependencies(
-      preferences: prefs,
+    return AccountData(
       transactionRepository: SqliteTransactionRepository(database),
       categoryRepository: SqliteCategoryRepository(database),
       budgetRepository: SqliteBudgetRepository(database),
       appSettingsRepository: SqliteAppSettingsRepository(database),
       backupService: SqliteBackupService(database),
-      authService: authService,
       syncService: syncService,
       historySource: CloudHistoryLoader(syncService, authService),
-      connectivity: ConnectivityPlusMonitor(),
-      householdService: FirebaseHouseholdService(),
       dataResetService: SyncDataResetService(syncService),
       recurringRepository: SqliteRecurringRepository(database),
       savingsRepository: savings,
+    );
+  }
+
+  final TransactionRepository transactionRepository;
+  final CategoryRepository categoryRepository;
+  final BudgetRepository budgetRepository;
+  final AppSettingsRepository appSettingsRepository;
+  final BackupService backupService;
+
+  /// Cloud sync; null disables it (used by widget tests).
+  final TransactionSyncService? syncService;
+  final TransactionHistorySource? historySource;
+
+  /// Reset App (this device only) and Restore My Cloud Data; null hides
+  /// them (builds without cloud).
+  final DataResetService? dataResetService;
+
+  /// Recurring transaction rules; null hides the Repeat option.
+  final RecurringRepository? recurringRepository;
+
+  /// Savings goals; null hides the savings feature.
+  final SavingsRepository? savingsRepository;
+}
+
+/// Opens the data of the account with the given UID.
+typedef AccountDataOpener = Future<AccountData> Function(String uid);
+
+/// Long-lived services created once at start-up and injected through
+/// MultiProvider. Tests construct this with in-memory fakes.
+class AppDependencies {
+  const AppDependencies({
+    required this.preferences,
+    required this.openAccount,
+    required this.authService,
+    this.fileService = const FileService(),
+    this.connectivity,
+    this.householdService,
+    this.savingsCloud,
+    this.profilePhotoService,
+    this.photoPicker,
+    this.pushMessaging,
+    this.localNotifier = const NoopLocalNotifier(),
+    this.notificationCloud,
+  });
+
+  /// Wires the Firebase- and SQLite-backed implementations. Account data
+  /// is opened later, once it is known who signed in.
+  static Future<AppDependencies> create() async {
+    final prefs = await SharedPreferences.getInstance();
+    // SQLite is the offline store; Firestore's own cache is not needed and
+    // every sync read must come from the server.
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: false,
+    );
+    final authService = FirebaseAuthService();
+    final localNotifier = SystemLocalNotifier.isSupported
+        ? SystemLocalNotifier()
+        : null;
+    // Android channels exist before the first push arrives.
+    unawaited(localNotifier?.prepare());
+    final savingsCloud = FirestoreSavingsStore();
+    return AppDependencies(
+      preferences: prefs,
+      openAccount: (uid) => AccountData.open(
+        uid,
+        authService: authService,
+        savingsCloud: savingsCloud,
+      ),
+      authService: authService,
+      connectivity: ConnectivityPlusMonitor(),
+      householdService: FirebaseHouseholdService(),
       savingsCloud: savingsCloud,
       profilePhotoService: FirebaseProfilePhotoService(),
       photoPicker: ImagePickerPhotoPicker(),
@@ -106,31 +154,15 @@ class AppDependencies {
   }
 
   final SharedPreferences preferences;
-  final TransactionRepository transactionRepository;
-  final CategoryRepository categoryRepository;
-  final BudgetRepository budgetRepository;
-  final AppSettingsRepository appSettingsRepository;
-  final BackupService backupService;
+
+  /// Opens a signed-in account's on-device data.
+  final AccountDataOpener openAccount;
   final AuthService authService;
   final FileService fileService;
-
-  /// Cloud sync; null disables it (used by widget tests).
-  final TransactionSyncService? syncService;
-  final TransactionHistorySource? historySource;
   final ConnectivityMonitor? connectivity;
 
   /// Household management; null disables households (widget tests).
   final HouseholdService? householdService;
-
-  /// Reset App (this device only) and Restore My Cloud Data; null hides
-  /// them (builds without cloud).
-  final DataResetService? dataResetService;
-
-  /// Recurring transaction rules; null hides the Repeat option.
-  final RecurringRepository? recurringRepository;
-
-  /// Savings goals; null hides the savings feature.
-  final SavingsRepository? savingsRepository;
 
   /// Household and shared savings in the cloud; null keeps savings
   /// personal-only (widget tests).

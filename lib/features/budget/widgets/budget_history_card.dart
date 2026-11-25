@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-
 import 'package:money_mate/core/theme/app_theme.dart';
 import 'package:money_mate/core/utils/date_range.dart';
 import 'package:money_mate/core/utils/money.dart';

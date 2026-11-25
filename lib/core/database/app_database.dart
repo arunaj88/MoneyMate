@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
@@ -78,6 +80,78 @@ class AppDatabase {
     final dir = await dbFactory.getDatabasesPath();
     final path = p.join(dir, AppConstants.databaseName);
     return _openAt(dbFactory, path);
+  }
+
+  /// Opens the on-device database of the account [uid].
+  ///
+  /// Every account has its own file, so signing in with another account on
+  /// the same device never shows (or syncs) someone else's records. Older
+  /// releases kept a single shared file ([AppConstants.databaseName]); it is
+  /// handed over, untouched, to the account it belongs to — the one it was
+  /// synchronised with, or the first account that opens it if it was never
+  /// synchronised. Other accounts start with an empty database.
+  static Future<AppDatabase> openForAccount(
+    String uid, {
+    DatabaseFactory? factory,
+  }) async {
+    final dbFactory = factory ?? databaseFactory;
+    final dir = await dbFactory.getDatabasesPath();
+    final path = p.join(dir, accountFileName(uid));
+    if (!await dbFactory.databaseExists(path)) {
+      await _claimLegacyDatabase(
+        dbFactory,
+        p.join(dir, AppConstants.databaseName),
+        path,
+        uid,
+      );
+    }
+    return _openAt(dbFactory, path);
+  }
+
+  /// File name of [uid]'s database. Firebase UIDs are alphanumeric; any
+  /// other character is replaced so the name is always a safe file name.
+  @visibleForTesting
+  static String accountFileName(String uid) {
+    final safe = uid.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    return 'money_mate_$safe.db';
+  }
+
+  /// Moves the shared database of older releases to [accountPath] when it
+  /// belongs to [uid]. The owner is recorded first, so an interrupted
+  /// hand-over is finished by the same account next time.
+  static Future<void> _claimLegacyDatabase(
+    DatabaseFactory factory,
+    String legacyPath,
+    String accountPath,
+    String uid,
+  ) async {
+    if (!await factory.databaseExists(legacyPath)) return;
+    final legacy = await _openAt(factory, legacyPath);
+    try {
+      final rows = await legacy.db.query(
+        Tables.appSettings,
+        columns: ['value'],
+        where: 'key = ?',
+        whereArgs: [SyncKeys.ownerUid],
+        limit: 1,
+      );
+      final owner = rows.isEmpty ? null : rows.first['value'] as String?;
+      if (owner != null && owner != uid) return;
+      if (owner == null) {
+        await legacy.db.insert(Tables.appSettings, {
+          'key': SyncKeys.ownerUid,
+          'value': uid,
+        });
+      }
+    } finally {
+      await legacy.close();
+    }
+    // Same directory, so each rename is atomic. SQLite side files (rollback
+    // journal or WAL) move with the database.
+    for (final suffix in const ['', '-journal', '-wal', '-shm']) {
+      final file = File('$legacyPath$suffix');
+      if (await file.exists()) await file.rename('$accountPath$suffix');
+    }
   }
 
   /// Opens an in-memory database (used by tests).

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:provider/single_child_widget.dart';
 
 import 'package:money_mate/core/constants/app_constants.dart';
 import 'package:money_mate/core/services/backup_service.dart';
@@ -23,7 +24,9 @@ import 'package:money_mate/providers/sync_provider.dart';
 import 'package:money_mate/providers/transaction_provider.dart';
 import 'package:money_mate/providers/transaction_scope_provider.dart';
 import 'package:money_mate/repositories/transaction_repository.dart';
+import 'package:money_mate/shared/widgets/dialogs.dart';
 import 'package:money_mate/shared/widgets/keyboard_dismiss.dart';
+import 'package:money_mate/app/account_session.dart';
 import 'package:money_mate/app/app_dependencies.dart';
 import 'package:money_mate/app/auth_navigator.dart';
 
@@ -47,9 +50,17 @@ class MoneyMateApp extends StatefulWidget {
 class _MoneyMateAppState extends State<MoneyMateApp> {
   final _navigatorKey = GlobalKey<NavigatorState>();
 
+  void _showOpenFailed() {
+    final context = _navigatorKey.currentContext;
+    if (context == null || !context.mounted) return;
+    showAppSnackBar(context, AccountSession.openFailedMessage, isError: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final deps = widget.dependencies;
+    // App-wide state only. Everything stored in an account's database is
+    // provided per account, around the navigator (see _AccountScope).
     return MultiProvider(
       providers: [
         ChangeNotifierProvider<AuthProvider>(
@@ -61,171 +72,18 @@ class _MoneyMateAppState extends State<MoneyMateApp> {
                 : deps.profilePhotoService,
           ),
         ),
-        ChangeNotifierProxyProvider<AuthProvider, HouseholdProvider>(
+        ChangeNotifierProvider<AccountSession>(
           lazy: false,
-          create: (_) => HouseholdProvider(
-            service: deps.householdService,
-            preferences: deps.preferences,
+          create: (context) => AccountSession(
+            context.read<AuthProvider>(),
+            deps.openAccount,
+            onOpenFailed: _showOpenFailed,
           ),
-          update: (_, auth, household) => household!..updateAuth(auth),
         ),
-        ChangeNotifierProxyProvider<
-          HouseholdProvider,
-          TransactionScopeProvider
-        >(
-          create: (_) => TransactionScopeProvider(deps.preferences),
-          update: (_, household, scope) => scope!..updateHousehold(household),
-        ),
-        Provider<BackupService>.value(value: deps.backupService),
         Provider<FileService>.value(value: deps.fileService),
         Provider<PhotoPicker?>.value(value: deps.photoPicker),
-        Provider<TransactionRepository>.value(
-          value: deps.transactionRepository,
-        ),
         ChangeNotifierProvider<SettingsProvider>(
           create: (_) => SettingsProvider(deps.preferences),
-        ),
-        ChangeNotifierProvider<CategoryProvider>(
-          create: (_) => CategoryProvider(deps.categoryRepository)..load(),
-        ),
-        ChangeNotifierProxyProvider3<
-          AuthProvider,
-          SettingsProvider,
-          CategoryProvider,
-          NotificationProvider
-        >(
-          // Not lazy: registers for pushes and shows them from start-up.
-          lazy: false,
-          create: (_) => NotificationProvider(
-            preferences: deps.preferences,
-            push: deps.pushMessaging,
-            local: deps.localNotifier,
-            cloud: deps.notificationCloud,
-          ),
-          update: (_, auth, settings, categories, notifications) =>
-              notifications!..attach(auth, settings, categories),
-        ),
-        ChangeNotifierProxyProvider2<
-          CategoryProvider,
-          TransactionScopeProvider,
-          TransactionProvider
-        >(
-          create: (_) => TransactionProvider(
-            deps.transactionRepository,
-            history: deps.historySource,
-          )..load(),
-          update: (_, categories, scope, transactions) => transactions!
-            ..onScopeChanged(scope)
-            ..onCategoriesChanged(categories),
-        ),
-        ChangeNotifierProxyProvider2<
-          AuthProvider,
-          TransactionProvider,
-          SavingsProvider
-        >(
-          create: (_) =>
-              SavingsProvider(deps.savingsRepository, cloud: deps.savingsCloud),
-          update: (_, auth, transactions, savings) =>
-              savings!..attach(auth, transactions),
-        ),
-        ChangeNotifierProxyProvider4<
-          SettingsProvider,
-          CategoryProvider,
-          TransactionProvider,
-          SavingsProvider,
-          DashboardProvider
-        >(
-          create: (_) => DashboardProvider(deps.transactionRepository),
-          update: (_, settings, categories, transactions, savings, dashboard) =>
-              dashboard!..updateDependencies(
-                settings,
-                categories,
-                transactions,
-                savings,
-              ),
-        ),
-        ChangeNotifierProxyProvider4<
-          SettingsProvider,
-          CategoryProvider,
-          TransactionProvider,
-          HouseholdProvider,
-          BudgetProvider
-        >(
-          create: (context) => BudgetProvider(
-            budgetRepository: deps.budgetRepository,
-            transactionRepository: deps.transactionRepository,
-            appSettingsRepository: deps.appSettingsRepository,
-            history: deps.historySource,
-            alertSink: context.read<NotificationProvider>(),
-          ),
-          update: (_, settings, categories, transactions, household, budget) =>
-              budget!..updateDependencies(
-                settings,
-                categories,
-                transactions,
-                household,
-              ),
-        ),
-        ChangeNotifierProxyProvider3<
-          SettingsProvider,
-          CategoryProvider,
-          TransactionProvider,
-          ReportProvider
-        >(
-          create: (_) => ReportProvider(
-            deps.transactionRepository,
-            history: deps.historySource,
-          ),
-          update: (_, settings, categories, transactions, report) =>
-              report!..updateDependencies(settings, categories, transactions),
-        ),
-        ChangeNotifierProxyProvider6<
-          AuthProvider,
-          HouseholdProvider,
-          CategoryProvider,
-          TransactionProvider,
-          BudgetProvider,
-          SavingsProvider,
-          SyncProvider
-        >(
-          // Not lazy: sync runs in the background from start-up.
-          lazy: false,
-          create: (_) => SyncProvider(
-            service: deps.syncService,
-            connectivity: deps.connectivity,
-          ),
-          update:
-              (
-                _,
-                auth,
-                household,
-                categories,
-                transactions,
-                budgets,
-                savings,
-                sync,
-              ) => sync!
-                ..updateDependencies(
-                  auth,
-                  categories,
-                  transactions,
-                  household: household,
-                  budgets: budgets,
-                  savings: savings,
-                ),
-        ),
-        ChangeNotifierProxyProvider<TransactionProvider, RecurringProvider>(
-          // Not lazy: due occurrences are added at start-up.
-          lazy: false,
-          create: (context) => RecurringProvider(
-            deps.recurringRepository,
-            sink: context.read<NotificationProvider>(),
-          ),
-          update: (_, transactions, recurring) =>
-              recurring!..attach(transactions),
-        ),
-        ChangeNotifierProvider<ResetProvider>(
-          create: (_) => ResetProvider(deps.dataResetService),
         ),
       ],
       child: Selector<SettingsProvider, ThemeMode>(
@@ -240,11 +98,15 @@ class _MoneyMateAppState extends State<MoneyMateApp> {
           // Edge-to-edge, transparent system bars on every screen.
           builder: (context, child) => AuthNavigator(
             auth: context.read<AuthProvider>(),
+            session: context.read<AccountSession>(),
             navigatorKey: _navigatorKey,
             minSplashDuration: widget.minSplashDuration,
-            child: SystemUiOverlay(
-              child: DismissKeyboardOnTap(
-                child: child ?? const SizedBox.shrink(),
+            child: _AccountScope(
+              dependencies: deps,
+              child: SystemUiOverlay(
+                child: DismissKeyboardOnTap(
+                  child: child ?? const SizedBox.shrink(),
+                ),
               ),
             ),
           ),
@@ -254,3 +116,180 @@ class _MoneyMateAppState extends State<MoneyMateApp> {
     );
   }
 }
+
+/// Provides the open account's data to every screen.
+///
+/// The providers are keyed by the account, so when another account signs in
+/// they are all disposed and created again from that account's database:
+/// nothing cached in memory carries over. The navigator below keeps its
+/// state (it has a global key), and [AuthNavigator] shows the home screen
+/// only once the new account's data is ready.
+class _AccountScope extends StatelessWidget {
+  const _AccountScope({required this.dependencies, required this.child});
+
+  final AppDependencies dependencies;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final session = context.watch<AccountSession>();
+    final data = session.data;
+    if (data == null) return child;
+    return MultiProvider(
+      key: ValueKey(session.uid),
+      providers: _accountProviders(dependencies, data),
+      child: child,
+    );
+  }
+}
+
+List<SingleChildWidget> _accountProviders(
+  AppDependencies deps,
+  AccountData data,
+) => [
+  ChangeNotifierProxyProvider<AuthProvider, HouseholdProvider>(
+    lazy: false,
+    create: (_) => HouseholdProvider(
+      service: deps.householdService,
+      preferences: deps.preferences,
+    ),
+    update: (_, auth, household) => household!..updateAuth(auth),
+  ),
+  ChangeNotifierProxyProvider<HouseholdProvider, TransactionScopeProvider>(
+    create: (_) => TransactionScopeProvider(deps.preferences),
+    update: (_, household, scope) => scope!..updateHousehold(household),
+  ),
+  Provider<BackupService>.value(value: data.backupService),
+  Provider<TransactionRepository>.value(value: data.transactionRepository),
+  ChangeNotifierProvider<CategoryProvider>(
+    create: (_) => CategoryProvider(data.categoryRepository)..load(),
+  ),
+  ChangeNotifierProxyProvider3<
+    AuthProvider,
+    SettingsProvider,
+    CategoryProvider,
+    NotificationProvider
+  >(
+    // Not lazy: registers for pushes and shows them from start-up.
+    lazy: false,
+    create: (_) => NotificationProvider(
+      preferences: deps.preferences,
+      push: deps.pushMessaging,
+      local: deps.localNotifier,
+      cloud: deps.notificationCloud,
+    ),
+    update: (_, auth, settings, categories, notifications) =>
+        notifications!..attach(auth, settings, categories),
+  ),
+  ChangeNotifierProxyProvider2<
+    CategoryProvider,
+    TransactionScopeProvider,
+    TransactionProvider
+  >(
+    create: (_) => TransactionProvider(
+      data.transactionRepository,
+      history: data.historySource,
+    )..load(),
+    update: (_, categories, scope, transactions) => transactions!
+      ..onScopeChanged(scope)
+      ..onCategoriesChanged(categories),
+  ),
+  ChangeNotifierProxyProvider2<
+    AuthProvider,
+    TransactionProvider,
+    SavingsProvider
+  >(
+    create: (_) =>
+        SavingsProvider(data.savingsRepository, cloud: deps.savingsCloud),
+    update: (_, auth, transactions, savings) =>
+        savings!..attach(auth, transactions),
+  ),
+  ChangeNotifierProxyProvider4<
+    SettingsProvider,
+    CategoryProvider,
+    TransactionProvider,
+    SavingsProvider,
+    DashboardProvider
+  >(
+    create: (_) => DashboardProvider(data.transactionRepository),
+    update: (_, settings, categories, transactions, savings, dashboard) =>
+        dashboard!
+          ..updateDependencies(settings, categories, transactions, savings),
+  ),
+  ChangeNotifierProxyProvider4<
+    SettingsProvider,
+    CategoryProvider,
+    TransactionProvider,
+    HouseholdProvider,
+    BudgetProvider
+  >(
+    create: (context) => BudgetProvider(
+      budgetRepository: data.budgetRepository,
+      transactionRepository: data.transactionRepository,
+      appSettingsRepository: data.appSettingsRepository,
+      history: data.historySource,
+      alertSink: context.read<NotificationProvider>(),
+    ),
+    update: (_, settings, categories, transactions, household, budget) =>
+        budget!
+          ..updateDependencies(settings, categories, transactions, household),
+  ),
+  ChangeNotifierProxyProvider3<
+    SettingsProvider,
+    CategoryProvider,
+    TransactionProvider,
+    ReportProvider
+  >(
+    create: (_) =>
+        ReportProvider(data.transactionRepository, history: data.historySource),
+    update: (_, settings, categories, transactions, report) =>
+        report!..updateDependencies(settings, categories, transactions),
+  ),
+  ChangeNotifierProxyProvider6<
+    AuthProvider,
+    HouseholdProvider,
+    CategoryProvider,
+    TransactionProvider,
+    BudgetProvider,
+    SavingsProvider,
+    SyncProvider
+  >(
+    // Not lazy: sync runs in the background from start-up.
+    lazy: false,
+    create: (_) => SyncProvider(
+      service: data.syncService,
+      connectivity: deps.connectivity,
+    ),
+    update:
+        (
+          _,
+          auth,
+          household,
+          categories,
+          transactions,
+          budgets,
+          savings,
+          sync,
+        ) => sync!
+          ..updateDependencies(
+            auth,
+            categories,
+            transactions,
+            household: household,
+            budgets: budgets,
+            savings: savings,
+          ),
+  ),
+  ChangeNotifierProxyProvider<TransactionProvider, RecurringProvider>(
+    // Not lazy: due occurrences are added at start-up.
+    lazy: false,
+    create: (context) => RecurringProvider(
+      data.recurringRepository,
+      sink: context.read<NotificationProvider>(),
+    ),
+    update: (_, transactions, recurring) => recurring!..attach(transactions),
+  ),
+  ChangeNotifierProvider<ResetProvider>(
+    create: (_) => ResetProvider(data.dataResetService),
+  ),
+];

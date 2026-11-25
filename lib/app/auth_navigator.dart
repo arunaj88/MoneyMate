@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'package:money_mate/app/account_session.dart';
 import 'package:money_mate/features/auth/screens/login_screen.dart';
 import 'package:money_mate/providers/auth_provider.dart';
 import 'package:money_mate/app/home_shell.dart';
@@ -20,12 +21,17 @@ class AuthNavigator extends StatefulWidget {
   const AuthNavigator({
     super.key,
     required this.auth,
+    required this.session,
     required this.navigatorKey,
     required this.minSplashDuration,
     required this.child,
   });
 
   final AuthProvider auth;
+
+  /// The signed-in account's on-device data. Home is shown only once it is
+  /// open, so a previous account's data never appears.
+  final AccountSession session;
   final GlobalKey<NavigatorState> navigatorKey;
   final Duration minSplashDuration;
   final Widget child;
@@ -44,6 +50,7 @@ class _AuthNavigatorState extends State<AuthNavigator> {
   void initState() {
     super.initState();
     widget.auth.addListener(_scheduleSync);
+    widget.session.addListener(_scheduleSync);
     if (widget.minSplashDuration <= Duration.zero) {
       _splashElapsed = true;
     } else {
@@ -63,11 +70,17 @@ class _AuthNavigatorState extends State<AuthNavigator> {
       widget.auth.addListener(_scheduleSync);
       _scheduleSync();
     }
+    if (oldWidget.session != widget.session) {
+      oldWidget.session.removeListener(_scheduleSync);
+      widget.session.addListener(_scheduleSync);
+      _scheduleSync();
+    }
   }
 
   @override
   void dispose() {
     widget.auth.removeListener(_scheduleSync);
+    widget.session.removeListener(_scheduleSync);
     _splashTimer?.cancel();
     super.dispose();
   }
@@ -86,6 +99,8 @@ class _AuthNavigatorState extends State<AuthNavigator> {
   void _sync() {
     final status = widget.auth.status;
     if (status == AuthStatus.unknown || !_splashElapsed) return;
+    // Signed in, but the account's data is still opening.
+    if (status == AuthStatus.authenticated && !widget.session.isReady) return;
     final target = status == AuthStatus.authenticated
         ? _Destination.home
         : _Destination.login;

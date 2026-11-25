@@ -267,6 +267,51 @@ void main() {
       expect(cloud.docs('household:house-1')['s']!.deleted, isFalse);
     });
 
+    test('reports the household as loading until it was fetched', () async {
+      final household = HouseholdProvider(
+        service: FakeHouseholdService(uid: testUser.uid),
+        preferences: await SharedPreferences.getInstance(),
+      )..updateAuth(auth);
+      addTearDown(household.dispose);
+      await household.createHousehold('Home');
+      await settle();
+      expect(sync.isFetchingHousehold, isFalse);
+
+      sync.updateDependencies(
+        auth,
+        categories,
+        transactions,
+        household: household,
+      );
+      // The first cycle starts in a microtask.
+      await Future<void>.microtask(() {});
+      expect(sync.isSyncing, isTrue);
+      expect(sync.isFetchingHousehold, isTrue);
+
+      await settle();
+      expect(sync.isFetchingHousehold, isFalse);
+      // Later cycles refresh in the background without a loading state.
+      unawaited(sync.syncNow());
+      await Future<void>.microtask(() {});
+      expect(sync.isFetchingHousehold, isFalse);
+      await settle();
+    });
+
+    test('reports personal data as loading until the first sync', () async {
+      expect(sync.isFetchingPersonal, isFalse);
+      sync.updateDependencies(auth, categories, transactions);
+      await Future<void>.microtask(() {});
+      expect(sync.isFetchingPersonal, isTrue);
+
+      await settle();
+      expect(sync.lastSyncedAt, isNotNull);
+      expect(sync.isFetchingPersonal, isFalse);
+      unawaited(sync.syncNow());
+      await Future<void>.microtask(() {});
+      expect(sync.isFetchingPersonal, isFalse);
+      await settle();
+    });
+
     test('syncs after sign-in and after local changes', () async {
       await repo.insert(tx(id: 'a', amountMinor: 100, date: DateTime.now()));
       sync.updateDependencies(auth, categories, transactions);

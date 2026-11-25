@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_mate/app/app_dependencies.dart';
@@ -52,6 +54,43 @@ class TestHarness {
   final ProfilePhotoService? photos;
   final PhotoPicker? photoPicker;
 
+  /// While set, opening an account's data waits for it (like a slow
+  /// database open).
+  Completer<void>? accountGate;
+
+  /// On-device data per account UID, like the per-account databases.
+  final Map<String, AccountData> _accounts = {};
+
+  /// UIDs whose data the app opened, in order.
+  List<String> get openedAccounts => List.unmodifiable(_accounts.keys);
+
+  /// The repositories above belong to the first account that signs in.
+  AccountData _firstAccount() => AccountData(
+    transactionRepository: transactions,
+    categoryRepository: categories,
+    budgetRepository: budgets,
+    appSettingsRepository: appSettings,
+    backupService: FakeBackupService(),
+    dataResetService: dataReset,
+    recurringRepository: recurring,
+    savingsRepository: savings,
+  );
+
+  /// Every other account starts with an empty device database.
+  AccountData _emptyAccount() {
+    final transactions = InMemoryTransactionRepository();
+    return AccountData(
+      transactionRepository: transactions,
+      categoryRepository: InMemoryCategoryRepository(),
+      budgetRepository: InMemoryBudgetRepository(),
+      appSettingsRepository: InMemoryAppSettingsRepository(),
+      backupService: FakeBackupService(),
+      dataResetService: dataReset,
+      recurringRepository: InMemoryRecurringRepository(transactions),
+      savingsRepository: savings == null ? null : InMemorySavingsRepository(),
+    );
+  }
+
   /// Pumps the app on a 390x844 phone by default; pass [logicalSize],
   /// [devicePixelRatio] and system [padding] (status bar, notch, home
   /// indicator) to emulate other devices.
@@ -79,16 +118,15 @@ class TestHarness {
       MoneyMateApp(
         dependencies: AppDependencies(
           preferences: prefs,
-          transactionRepository: transactions,
-          categoryRepository: categories,
-          budgetRepository: budgets,
-          appSettingsRepository: appSettings,
-          backupService: FakeBackupService(),
+          openAccount: (uid) async {
+            if (accountGate != null) await accountGate!.future;
+            return _accounts.putIfAbsent(
+              uid,
+              () => _accounts.isEmpty ? _firstAccount() : _emptyAccount(),
+            );
+          },
           authService: auth,
           householdService: households,
-          dataResetService: dataReset,
-          recurringRepository: recurring,
-          savingsRepository: savings,
           profilePhotoService: photos,
           photoPicker: photoPicker,
         ),

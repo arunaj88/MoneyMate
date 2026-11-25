@@ -36,6 +36,11 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
 
+  /// How the user last signed in from this screen. After a successful
+  /// sign-in the screen stays up while the account's data opens; that
+  /// button keeps its spinner until the dashboard appears.
+  bool _usedGoogle = false;
+
   @override
   void dispose() {
     _name.dispose();
@@ -63,6 +68,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (auth.isBusy) return;
     FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) return;
+    setState(() => _usedGoogle = false);
 
     final ok = _registering
         ? await auth.register(
@@ -78,6 +84,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final auth = context.read<AuthProvider>();
     if (auth.isBusy) return;
     FocusScope.of(context).unfocus();
+    setState(() => _usedGoogle = true);
     final ok = await auth.signInWithGoogle();
     if (!ok) _showError(auth);
   }
@@ -106,7 +113,9 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final auth = context.watch<AuthProvider>();
-    final busy = auth.isBusy;
+    // Signed in, waiting for the dashboard (the account's data is opening).
+    final entering = auth.isAuthenticated;
+    final busy = auth.isBusy || entering;
 
     return Scaffold(
       body: SafeArea(
@@ -257,7 +266,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: _ButtonContent(
                           loading:
                               auth.isRunning(AuthAction.signIn) ||
-                              auth.isRunning(AuthAction.register),
+                              auth.isRunning(AuthAction.register) ||
+                              (entering && !_usedGoogle),
                           label: _registering ? 'Create account' : 'Sign in',
                         ),
                       ),
@@ -287,7 +297,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         onPressed: busy ? null : _google,
                         child: _ButtonContent(
-                          loading: auth.isRunning(AuthAction.google),
+                          loading:
+                              auth.isRunning(AuthAction.google) ||
+                              (entering && _usedGoogle),
                           label: 'Continue with Google',
                           icon: const _GoogleMark(),
                         ),

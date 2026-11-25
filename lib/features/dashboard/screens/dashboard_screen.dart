@@ -387,7 +387,9 @@ class _RecentTransactionsCard extends StatelessWidget {
               onAction: onSeeAll,
             ),
           ),
-          if (data.recentTransactions.isEmpty)
+          if (data.recentTransactions.isEmpty && isViewLoading(context))
+            const LoadingView(padding: EdgeInsets.all(Spacing.lg))
+          else if (data.recentTransactions.isEmpty)
             EmptyState(
               icon: Icons.receipt_long_rounded,
               title: 'No transactions yet',

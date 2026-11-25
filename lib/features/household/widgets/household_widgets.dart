@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'package:money_mate/core/theme/app_theme.dart';
 import 'package:money_mate/models/scope_models.dart';
+import 'package:money_mate/providers/sync_provider.dart';
 import 'package:money_mate/models/transaction_model.dart';
 import 'package:money_mate/providers/household_provider.dart';
 import 'package:money_mate/providers/transaction_scope_provider.dart';
@@ -31,6 +33,9 @@ Future<void> openHouseholdScreen(BuildContext context) => Navigator.of(
 
 /// Personal / Household switch for the app-wide transaction view.
 /// Hidden while the user has no household, so only personal data shows.
+///
+/// Below it, a note says when the data of the selected view is still being
+/// downloaded for the first time (shown even without a household).
 class ViewScopeSelector extends StatelessWidget {
   const ViewScopeSelector({super.key, this.padding = EdgeInsets.zero});
 
@@ -39,30 +44,87 @@ class ViewScopeSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scope = context.watch<TransactionScopeProvider>();
-    if (!scope.canShare) return const SizedBox.shrink();
+    final loading = isViewLoading(context);
+    final note = AnimatedSize(
+      duration: const Duration(milliseconds: 200),
+      child: loading
+          ? _LoadingNote(shared: scope.view == ViewScope.shared)
+          : const SizedBox(width: double.infinity),
+    );
+    if (!scope.canShare) {
+      return loading ? Padding(padding: padding, child: note) : note;
+    }
     return Padding(
       padding: padding,
-      child: SizedBox(
-        width: double.infinity,
-        child: SegmentedButton<ViewScope>(
-          key: const Key('viewScopeSelector'),
-          showSelectedIcon: false,
-          segments: [
-            ButtonSegment(
-              value: ViewScope.personal,
-              label: Text(ViewScope.personal.label),
-              icon: const Icon(Icons.person_outline_rounded),
-            ),
-            ButtonSegment(
-              value: ViewScope.shared,
-              label: Text(ViewScope.shared.label),
-              icon: const Icon(Icons.home_outlined),
-              tooltip: scope.householdName,
-            ),
-          ],
-          selected: {scope.view},
-          onSelectionChanged: (s) => scope.setView(s.first),
+      child: Column(children: [_selector(scope), note]),
+    );
+  }
+
+  Widget _selector(TransactionScopeProvider scope) => SizedBox(
+    width: double.infinity,
+    child: SegmentedButton<ViewScope>(
+      key: const Key('viewScopeSelector'),
+      showSelectedIcon: false,
+      segments: [
+        ButtonSegment(
+          value: ViewScope.personal,
+          label: Text(ViewScope.personal.label),
+          icon: const Icon(Icons.person_outline_rounded),
         ),
+        ButtonSegment(
+          value: ViewScope.shared,
+          label: Text(ViewScope.shared.label),
+          icon: const Icon(Icons.home_outlined),
+          tooltip: scope.householdName,
+        ),
+      ],
+      selected: {scope.view},
+      onSelectionChanged: (s) => scope.setView(s.first),
+    ),
+  );
+}
+
+/// Whether the selected view's data (personal or household) is still being
+/// downloaded for the first time. Screens show a loading state then
+/// instead of "nothing here".
+bool isViewLoading(BuildContext context) {
+  final shared = context.select<TransactionScopeProvider, bool>(
+    (s) => s.view == ViewScope.shared,
+  );
+  return context.select<SyncProvider, bool>(
+    (s) => shared ? s.isFetchingHousehold : s.isFetchingPersonal,
+  );
+}
+
+/// "Getting your data…" / "Getting household data…" under the switch.
+class _LoadingNote extends StatelessWidget {
+  const _LoadingNote({required this.shared});
+
+  final bool shared;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      key: const Key('viewLoadingNote'),
+      padding: const EdgeInsets.only(top: Spacing.sm),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox.square(
+            dimension: 14,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: Spacing.sm),
+          Flexible(
+            child: Text(
+              shared ? 'Getting household data…' : 'Getting your data…',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

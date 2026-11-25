@@ -194,4 +194,88 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(HomeShell), findsNothing);
   });
+
+  testWidgets('sign-in keeps its spinner until the dashboard opens', (
+    tester,
+  ) async {
+    final harness = TestHarness(user: null);
+    await harness.pump(tester);
+    harness.accountGate = Completer<void>();
+
+    await fillLogin(
+      tester,
+      email: 'sam.lee@example.com',
+      password: 'secret123',
+    );
+    await tester.tap(find.byKey(const Key('submitAuthButton')));
+    await tester.pump();
+    await tester.pump();
+
+    // Signed in, account data still opening: no frozen-looking screen.
+    expect(find.byType(LoginScreen), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('submitAuthButton')),
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<OutlinedButton>(find.byKey(const Key('googleSignInButton')))
+          .onPressed,
+      isNull,
+    );
+
+    harness.accountGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(HomeShell), findsOneWidget);
+  });
+
+  testWidgets('each account on a device sees only its own data', (
+    tester,
+  ) async {
+    final harness = TestHarness(
+      transactions: [
+        tx(id: 'a', amountMinor: 1000, date: DateTime.now(), note: 'Lunch'),
+      ],
+    );
+    await harness.pump(tester);
+    expect(find.textContaining('Lunch'), findsWidgets);
+
+    Future<void> signOut() async {
+      await openTab(tester, 'Settings');
+      await tapKey(tester, 'signOutTile');
+      await tester.tap(find.widgetWithText(FilledButton, 'Sign out'));
+      await tester.pumpAndSettle();
+      expect(find.byType(LoginScreen), findsOneWidget);
+    }
+
+    // A new account starts empty instead of showing Sam's records.
+    await signOut();
+    await tapKey(tester, 'toggleAuthModeButton');
+    await tester.enterText(find.byKey(const Key('nameField')), 'Nia Patel');
+    await fillLogin(tester, email: 'nia@x.io', password: 'secret1');
+    await tester.enterText(
+      find.byKey(const Key('confirmPasswordField')),
+      'secret1',
+    );
+    await tapKey(tester, 'submitAuthButton');
+    expect(find.byType(HomeShell), findsOneWidget);
+    expect(find.textContaining('Lunch'), findsNothing);
+
+    // Signing back in to the first account shows its data again.
+    await signOut();
+    await fillLogin(
+      tester,
+      email: 'sam.lee@example.com',
+      password: 'secret123',
+    );
+    await tapKey(tester, 'submitAuthButton');
+    expect(find.byType(HomeShell), findsOneWidget);
+    expect(find.textContaining('Lunch'), findsWidgets);
+
+    expect(harness.openedAccounts, hasLength(2));
+    expect(harness.transactions.items, hasLength(1));
+  });
 }
