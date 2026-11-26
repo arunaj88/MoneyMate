@@ -178,6 +178,13 @@ class _LoanDetailsScreenState extends State<LoanDetailsScreen> {
         title: Text(loan.borrowerName),
         actions: [
           if (canManage)
+            IconButton(
+              key: const Key('shareLoanButton'),
+              tooltip: 'Share loan details',
+              icon: const Icon(Icons.ios_share_rounded),
+              onPressed: () => openLoanStatement(context, loan.id),
+            ),
+          if (canManage)
             PopupMenuButton<_Action>(
               key: const Key('loanActionsMenu'),
               onSelected: (a) => _onAction(a, snapshot),
@@ -263,7 +270,13 @@ class _LoanDetailsScreenState extends State<LoanDetailsScreen> {
               ),
               const SizedBox(height: Spacing.md),
             ],
-            _SummaryCard(snapshot: snapshot, formatter: formatter),
+            _SummaryCard(
+              snapshot: snapshot,
+              formatter: formatter,
+              onShare: canManage
+                  ? () => openLoanStatement(context, loan.id)
+                  : null,
+            ),
             const SizedBox(height: Spacing.md),
             _DetailsCard(
               snapshot: snapshot,
@@ -517,10 +530,17 @@ class _ReminderBanner extends StatelessWidget {
 }
 
 class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({required this.snapshot, required this.formatter});
+  const _SummaryCard({
+    required this.snapshot,
+    required this.formatter,
+    this.onShare,
+  });
 
   final LoanSnapshot snapshot;
   final CurrencyFormatter formatter;
+
+  /// Opens the statement to share with the borrower.
+  final VoidCallback? onShare;
 
   @override
   Widget build(BuildContext context) {
@@ -590,6 +610,18 @@ class _SummaryCard extends StatelessWidget {
               style: theme.textTheme.bodySmall?.copyWith(
                 color: context.finance.expense,
                 fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+          if (onShare != null) ...[
+            const SizedBox(height: Spacing.md),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: const Key('shareLoanDetailsButton'),
+                onPressed: onShare,
+                icon: const Icon(Icons.ios_share_rounded, size: 18),
+                label: const Text('Share loan details'),
               ),
             ),
           ],

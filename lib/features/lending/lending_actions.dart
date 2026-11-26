@@ -4,6 +4,7 @@ import 'package:money_mate/features/lending/screens/borrower_screen.dart';
 import 'package:money_mate/features/lending/screens/lending_screen.dart';
 import 'package:money_mate/features/lending/screens/loan_details_screen.dart';
 import 'package:money_mate/features/lending/screens/loan_form_screen.dart';
+import 'package:money_mate/features/lending/screens/loan_statement_screen.dart';
 import 'package:money_mate/features/lending/screens/reminder_settings_screen.dart';
 import 'package:money_mate/features/lending/widgets/repayment_sheet.dart';
 import 'package:money_mate/models/loan_model.dart';
@@ -43,6 +44,14 @@ Future<void> openLoanDetails(
         LoanDetailsScreen(loanId: loanId, installmentId: installmentId),
   ),
 );
+
+/// Opens the statement of [loanId] to review and share with the borrower.
+Future<void> openLoanStatement(BuildContext context, String loanId) =>
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => LoanStatementScreen(loanId: loanId),
+      ),
+    );
 
 /// Opens every loan of one borrower.
 Future<void> openBorrower(BuildContext context, String borrowerKey) =>

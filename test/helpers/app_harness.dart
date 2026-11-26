@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:money_mate/app/app_dependencies.dart';
 import 'package:money_mate/app/money_mate_app.dart';
 import 'package:money_mate/core/services/data_reset_service.dart';
+import 'package:money_mate/core/services/file_service.dart';
 import 'package:money_mate/core/services/household_service.dart';
 import 'package:money_mate/core/services/notification_service.dart';
 import 'package:money_mate/core/services/photo_picker.dart';
@@ -29,6 +30,7 @@ class TestHarness {
     this.photos,
     this.photoPicker,
     this.localNotifier,
+    this.fileService,
   }) : savings = withSavings ? InMemorySavingsRepository() : null,
        loans = withLoans ? InMemoryLoanRepository() : null,
        auth = FakeAuthService(signedIn: user),
@@ -64,6 +66,9 @@ class TestHarness {
 
   /// On-device notifications (and their taps); none by default.
   final LocalNotifier? localNotifier;
+
+  /// Device files and the share sheet; the real service by default.
+  final FileService? fileService;
 
   /// While set, opening an account's data waits for it (like a slow
   /// database open).
@@ -143,6 +148,7 @@ class TestHarness {
           profilePhotoService: photos,
           photoPicker: photoPicker,
           localNotifier: localNotifier ?? const NoopLocalNotifier(),
+          fileService: fileService ?? const FileService(),
         ),
         minSplashDuration: Duration.zero,
       ),

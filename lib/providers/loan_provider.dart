@@ -186,6 +186,16 @@ class LoanProvider extends ChangeNotifier {
     return null;
   }
 
+  /// [id]'s loan as saved (its agreed schedule, before repayments are
+  /// applied), for statements; null when it is not shown.
+  Loan? storedLoanById(String id) {
+    if (snapshotById(id) == null) return null;
+    for (final l in _loans) {
+      if (l.id == id) return l;
+    }
+    return null;
+  }
+
   /// [loanId]'s repayments, newest first (voided and refused included).
   List<LoanRepayment> repaymentsOf(String loanId) => [
     for (final r in _repayments)

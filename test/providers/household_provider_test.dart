@@ -269,10 +269,26 @@ void main() {
       expect(ids(), ['p']);
     });
 
+    test('a new launch opens personal even after choosing household', () async {
+      await household.createHousehold('Home');
+      await settle();
+      final first = TransactionScopeProvider(prefs)..updateHousehold(household);
+      await settle();
+      await first.setView(ViewScope.shared);
+      expect(first.view, ViewScope.shared);
+      first.dispose();
+
+      final relaunched = TransactionScopeProvider(prefs)
+        ..updateHousehold(household);
+      await settle();
+      expect(relaunched.view, ViewScope.personal);
+      relaunched.dispose();
+    });
+
     test(
-      'a saved "combined" view from an older version opens personal',
+      'a saved view from an older version is ignored and removed',
       () async {
-        await prefs.setString(PrefKeys.viewScope, 'combined');
+        await prefs.setString(PrefKeys.viewScope, 'shared');
         final restored = TransactionScopeProvider(prefs);
         await household.createHousehold('Home');
         await settle();
@@ -280,6 +296,7 @@ void main() {
         await settle();
         expect(restored.view, ViewScope.personal);
         expect(restored.filter, const ScopeFilter.personal());
+        expect(prefs.containsKey(PrefKeys.viewScope), isFalse);
         expect(ViewScope.values.map((v) => v.label), ['Personal', 'Household']);
         restored.dispose();
       },

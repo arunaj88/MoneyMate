@@ -10,12 +10,18 @@ import 'package:money_mate/providers/household_provider.dart';
 ///
 /// The dashboard, transaction list and reports all follow it, so the
 /// numbers on every screen describe the same set of transactions.
+///
+/// Every launch opens on the personal view; switching to the household
+/// view lasts until the app is closed. The choice is not saved, and a
+/// value saved by older versions is removed.
 class TransactionScopeProvider extends ChangeNotifier {
-  TransactionScopeProvider(this._prefs)
-    : _view = ViewScope.fromName(_prefs.getString(PrefKeys.viewScope));
+  TransactionScopeProvider(SharedPreferences prefs) {
+    if (prefs.containsKey(PrefKeys.viewScope)) {
+      prefs.remove(PrefKeys.viewScope);
+    }
+  }
 
-  final SharedPreferences _prefs;
-  ViewScope _view;
+  ViewScope _view = ViewScope.personal;
   String? _householdId;
   String? _householdName;
   bool _disposed = false;
@@ -45,7 +51,6 @@ class TransactionScopeProvider extends ChangeNotifier {
     if (view == _view) return;
     _view = view;
     _notify();
-    await _prefs.setString(PrefKeys.viewScope, view.name);
   }
 
   void _notify() {

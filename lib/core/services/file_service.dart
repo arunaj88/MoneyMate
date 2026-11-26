@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -12,6 +12,8 @@ import 'package:share_plus/share_plus.dart';
 /// system share sheet / file picker is used to move them.
 class FileService {
   const FileService();
+
+  static const MethodChannel _shareChannel = MethodChannel('money_mate/share');
 
   bool get _isMobile => Platform.isAndroid || Platform.isIOS;
 
@@ -50,6 +52,55 @@ class FileService {
     await SharePlus.instance.share(
       ShareParams(files: [XFile(file.path)], subject: subject, title: subject),
     );
+  }
+
+  /// Writes [bytes] to a temporary file and opens the share sheet with it.
+  /// [subject] is used by email apps; [origin] anchors the sheet on iPad.
+  /// Returns false when the user dismissed the sheet (always true on
+  /// Android, where that is not reported).
+  ///
+  /// On Android the app's own share call is used (see `MainActivity`): it
+  /// gives every receiving app read access to the file, which some share
+  /// sheets (e.g. MIUI's) otherwise drop, so apps like Slack could not
+  /// open it.
+  Future<bool> shareBytes({
+    required String fileName,
+    required Uint8List bytes,
+    required String mimeType,
+    String? subject,
+    Rect? origin,
+  }) async {
+    final dir = await getTemporaryDirectory();
+    final file = File(p.join(dir.path, fileName));
+    await file.writeAsBytes(bytes, flush: true);
+    if (Platform.isAndroid) {
+      await _shareChannel.invokeMethod<bool>('shareFile', {
+        'path': file.path,
+        'mimeType': mimeType,
+        'subject': subject,
+      });
+      return true;
+    }
+    final result = await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(file.path, mimeType: mimeType, name: fileName)],
+        subject: subject,
+        sharePositionOrigin: origin,
+      ),
+    );
+    return result.status != ShareResultStatus.dismissed;
+  }
+
+  /// Opens the share sheet with [text]. Returns false when dismissed.
+  Future<bool> shareText({
+    required String text,
+    String? subject,
+    Rect? origin,
+  }) async {
+    final result = await SharePlus.instance.share(
+      ShareParams(text: text, subject: subject, sharePositionOrigin: origin),
+    );
+    return result.status != ShareResultStatus.dismissed;
   }
 
   /// Stores a copy in the app's private documents folder (used for the
