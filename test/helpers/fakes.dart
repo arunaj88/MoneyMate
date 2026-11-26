@@ -386,10 +386,16 @@ class FakeAuthService implements AuthService {
       throw AuthException(firebaseAuthMessage('email-already-in-use'));
     }
     accounts[email.trim()] = password;
-    // Like Firebase, the auth state fires before the display name is set.
+    // Like Firebase, the auth state fires before the display name is set,
+    // and new email/password accounts start unverified.
     final uid = 'uid-${email.hashCode}';
-    _emit(AppUser(uid: uid, email: email.trim()));
-    final named = AppUser(uid: uid, email: email.trim(), displayName: name);
+    _emit(AppUser(uid: uid, email: email.trim(), emailVerified: false));
+    final named = AppUser(
+      uid: uid,
+      email: email.trim(),
+      displayName: name,
+      emailVerified: false,
+    );
     _user = named;
     return named;
   }
@@ -414,7 +420,52 @@ class FakeAuthService implements AuthService {
   Future<void> signOut() async {
     calls.add('signOut');
     await _wait();
+    _verifiedOnServer = false;
     _emit(null);
+  }
+
+  // ----------------------------------------------- email verification
+
+  /// Verification emails sent so far.
+  int verificationEmailsSent = 0;
+
+  /// Thrown (once) by the next [sendEmailVerification].
+  AuthException? sendError;
+
+  /// Thrown (once) by the next [reloadUser].
+  AuthException? reloadError;
+
+  bool _verifiedOnServer = false;
+
+  /// The user opened the verification link (on any device). Like Firebase,
+  /// the app sees it only after a reload.
+  void verifyOnServer() => _verifiedOnServer = true;
+
+  @override
+  Future<void> sendEmailVerification() async {
+    calls.add('sendVerification');
+    await _wait();
+    final error = sendError;
+    if (error != null) {
+      sendError = null;
+      throw error;
+    }
+    verificationEmailsSent++;
+  }
+
+  @override
+  Future<AppUser?> reloadUser() async {
+    calls.add('reload');
+    await _wait();
+    final error = reloadError;
+    if (error != null) {
+      reloadError = null;
+      if (error.code == 'session-expired') _emit(null);
+      throw error;
+    }
+    final user = _user;
+    if (user != null && _verifiedOnServer) _user = user.withEmailVerified(true);
+    return _user;
   }
 }
 

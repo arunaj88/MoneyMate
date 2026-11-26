@@ -34,6 +34,11 @@ function requireAuth(auth) {
   if (!auth || !auth.uid) {
     throw fail('unauthenticated', 'Please sign in to continue.');
   }
+  // Households hold financial data, which only verified accounts may use
+  // (the same check as signedIn() in firestore.rules).
+  if (auth.token?.email_verified !== true) {
+    throw fail('permission-denied', 'Verify your email address to continue.');
+  }
   return auth.uid;
 }
 

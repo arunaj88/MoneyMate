@@ -69,6 +69,11 @@ class PrefKeys {
   /// JSON profile of the signed-in user (UID, name, email, photo URL).
   static const String userProfile = 'auth.userProfile';
 
+  /// When this device last asked Firebase to email a verification link
+  /// (UID, email, time), so a restart neither resends it nor resets the
+  /// resend countdown.
+  static const String verificationEmailSent = 'auth.verificationEmailSent';
+
   /// Dashboard / transactions view: personal or household (shared).
   static const String viewScope = 'household.viewScope';
 

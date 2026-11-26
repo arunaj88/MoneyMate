@@ -79,10 +79,18 @@ function sharedTx(uid, id, extra = {}) {
   };
 }
 
+/** A client signed in as [uid] with a verified email. */
 function db(uid) {
   return uid
-    ? env.authenticatedContext(uid).firestore()
+    ? env.authenticatedContext(uid, { email_verified: true }).firestore()
     : env.unauthenticatedContext().firestore();
+}
+
+/** A client signed in as [uid] whose email is not verified yet. */
+function unverifiedDb(uid) {
+  return env
+    .authenticatedContext(uid, { email: `${uid}@example.com`, email_verified: false })
+    .firestore();
 }
 
 test.describe('firestore.rules', { skip }, () => {
@@ -163,6 +171,34 @@ test.describe('firestore.rules', { skip }, () => {
     await assertSucceeds(
       db(OWNER).collection(`users/${OWNER}/transactions`).orderBy('serverUpdatedAt').get(),
     );
+  });
+
+  // -------------------------------------------------- email verification
+
+  test('accounts with an unverified email cannot use any financial data', async () => {
+    // Owner and partner are active household members, but unverified here.
+    const owner = unverifiedDb(OWNER);
+    await assertFails(owner.doc(`users/${OWNER}`).get());
+    await assertFails(owner.doc(`users/${OWNER}/transactions/legacy`).get());
+    await assertFails(owner.collection(`users/${OWNER}/transactions`).get());
+    await assertFails(owner.doc(`users/${OWNER}/transactions/t1`).set(personalTx(OWNER, 't1')));
+    await assertFails(owner.collection(`users/${OWNER}/savingsGoals`).get());
+    await assertFails(owner.collection(`users/${OWNER}/loans`).get());
+    await assertFails(owner.collection(`users/${OWNER}/devices`).get());
+    await assertFails(owner.doc(`households/${HID}`).get());
+    await assertFails(owner.collection(`households/${HID}/transactions`).get());
+    await assertFails(
+      unverifiedDb(PARTNER)
+        .doc(`households/${HID}/transactions/t2`)
+        .set(sharedTx(PARTNER, 't2')),
+    );
+    await assertFails(owner.collection('sharedGoalInvitations').doc('ABC').get());
+    // A token without the claim at all is treated as unverified.
+    const noClaim = env.authenticatedContext(OWNER, { email: 'o@example.com' }).firestore();
+    await assertFails(noClaim.doc(`users/${OWNER}/transactions/legacy`).get());
+    // The same account once verified.
+    await assertSucceeds(db(OWNER).doc(`users/${OWNER}/transactions/legacy`).get());
+    await assertSucceeds(db(OWNER).doc(`households/${HID}/transactions/existing`).get());
   });
 
   test('personal transactions are private to their owner', async () => {
@@ -650,9 +686,9 @@ test.describe('firestore.rules', { skip }, () => {
   const FRIEND = 'friend-uid';
   const OTHER = 'other-uid';
   const friendDb = () =>
-    env.authenticatedContext(FRIEND, { email: 'friend@example.com' }).firestore();
+    env.authenticatedContext(FRIEND, { email: 'friend@example.com', email_verified: true }).firestore();
   const otherDb = () =>
-    env.authenticatedContext(OTHER, { email: 'other@example.com' }).firestore();
+    env.authenticatedContext(OTHER, { email: 'other@example.com', email_verified: true }).firestore();
 
   const SG = 'sharedGoals/sg';
   const SG_ENTRIES = `${SG}/entries`;

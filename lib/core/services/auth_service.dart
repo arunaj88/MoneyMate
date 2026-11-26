@@ -44,6 +44,18 @@ abstract class AuthService {
   Future<void> sendPasswordResetEmail(String email);
 
   Future<void> signOut();
+
+  /// Emails Firebase's verification link to the signed-in account's
+  /// address. Tapping it marks the account verified.
+  Future<void> sendEmailVerification();
+
+  /// Fetches the signed-in account from the server (picking up an email
+  /// verified meanwhile, from any device) and refreshes its ID token so the
+  /// security rules see the current `email_verified` claim. Returns null
+  /// when nobody is signed in. Throws an [AuthException] with code
+  /// `session-expired` (after signing out) when the account was deleted,
+  /// disabled or its sign-in expired.
+  Future<AppUser?> reloadUser();
 }
 
 /// [AuthService] backed by Firebase Authentication and Google Sign-In.
@@ -55,6 +67,19 @@ class FirebaseAuthService implements AuthService {
   final FirebaseAuth _auth;
   final GoogleSignIn _googleSignIn;
   Future<void>? _googleInit;
+
+  /// Firebase error codes meaning the saved sign-in is no longer valid.
+  static const _sessionEnded = {
+    'user-not-found',
+    'user-disabled',
+    'user-token-expired',
+    'invalid-user-token',
+  };
+
+  static const _sessionExpired = AuthException(
+    'Your session has expired. Please sign in again.',
+    code: 'session-expired',
+  );
 
   static AppUser? _map(User? user) => appUserFromFirebase(user);
 
@@ -144,6 +169,29 @@ class FirebaseAuthService implements AuthService {
     await _auth.signOut();
   });
 
+  @override
+  Future<void> sendEmailVerification() => _guard(() async {
+    final user = _auth.currentUser;
+    if (user == null) throw _sessionExpired;
+    await user.sendEmailVerification();
+  });
+
+  @override
+  Future<AppUser?> reloadUser() => _guard(() async {
+    final user = _auth.currentUser;
+    if (user == null) return null;
+    try {
+      await user.reload();
+      // Force a new ID token: the old one still says email_verified=false.
+      await (_auth.currentUser ?? user).getIdToken(true);
+    } on FirebaseAuthException catch (e) {
+      if (!_sessionEnded.contains(e.code)) rethrow;
+      await signOut();
+      throw _sessionExpired;
+    }
+    return _map(_auth.currentUser);
+  });
+
   /// Converts Firebase and Google errors into [AuthException]s.
   Future<T> _guard<T>(Future<T> Function() action) async {
     try {
@@ -179,6 +227,7 @@ AppUser? appUserFromFirebase(User? user) => user == null
         email: user.email,
         displayName: user.displayName,
         photoUrl: user.photoURL,
+        emailVerified: user.emailVerified,
       );
 
 /// User-facing message for a Firebase Authentication error code.

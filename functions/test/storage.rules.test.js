@@ -23,7 +23,7 @@ const JPEG = { contentType: 'image/jpeg' };
 
 function storage(uid) {
   return uid
-    ? env.authenticatedContext(uid).storage()
+    ? env.authenticatedContext(uid, { email_verified: true }).storage()
     : env.unauthenticatedContext().storage();
 }
 
@@ -70,6 +70,16 @@ test.describe('storage rules', { skip }, () => {
     await storage(OWNER).ref(avatar(OWNER)).put(jpeg(), JPEG);
     await assertSucceeds(storage(OTHER).ref(avatar(OWNER)).getDownloadURL());
     await assertFails(storage(null).ref(avatar(OWNER)).getDownloadURL());
+  });
+
+  test('accounts with an unverified email cannot read or write photos', async () => {
+    await storage(OWNER).ref(avatar(OWNER)).put(jpeg(), JPEG);
+    const unverified = env
+      .authenticatedContext(OWNER, { email_verified: false })
+      .storage();
+    await assertFails(unverified.ref(avatar(OWNER)).put(jpeg(), JPEG));
+    await assertFails(unverified.ref(avatar(OWNER)).getDownloadURL());
+    await assertFails(unverified.ref(avatar(OWNER)).delete());
   });
 
   test('only JPEGs under 1 MB are accepted', async () => {

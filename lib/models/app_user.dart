@@ -7,6 +7,7 @@ class AppUser {
     this.email,
     this.displayName,
     this.photoUrl,
+    this.emailVerified = true,
   });
 
   /// Firebase UID.
@@ -14,6 +15,18 @@ class AppUser {
   final String? email;
   final String? displayName;
   final String? photoUrl;
+
+  /// Firebase Authentication's `emailVerified` flag. Always taken from
+  /// Firebase (see appUserFromFirebase), never from the cached profile.
+  /// Google accounts arrive verified; email/password accounts verify with
+  /// the link Firebase emails them.
+  final bool emailVerified;
+
+  /// True when the account has an email address that is not verified yet.
+  /// Such accounts only see the verification screen: the security rules
+  /// deny their requests to any financial data.
+  bool get needsEmailVerification =>
+      !emailVerified && (email?.trim().isNotEmpty ?? false);
 
   bool get hasName => displayName != null && displayName!.trim().isNotEmpty;
 
@@ -50,8 +63,18 @@ class AppUser {
       email: email ?? other.email,
       displayName: hasName ? displayName : other.displayName,
       photoUrl: hasPhoto ? photoUrl : other.photoUrl,
+      emailVerified: emailVerified,
     );
   }
+
+  /// This profile with [emailVerified] replaced.
+  AppUser withEmailVerified(bool emailVerified) => AppUser(
+    uid: uid,
+    email: email,
+    displayName: displayName,
+    photoUrl: photoUrl,
+    emailVerified: emailVerified,
+  );
 
   /// This profile with [photoUrl] replaced (null or empty removes it).
   AppUser withPhotoUrl(String? photoUrl) => AppUser(
@@ -59,6 +82,7 @@ class AppUser {
     email: email,
     displayName: displayName,
     photoUrl: photoUrl == null || photoUrl.trim().isEmpty ? null : photoUrl,
+    emailVerified: emailVerified,
   );
 
   Map<String, Object?> toMap() => {
@@ -92,8 +116,10 @@ class AppUser {
       other.uid == uid &&
       other.email == email &&
       other.displayName == displayName &&
-      other.photoUrl == photoUrl;
+      other.photoUrl == photoUrl &&
+      other.emailVerified == emailVerified;
 
   @override
-  int get hashCode => Object.hash(uid, email, displayName, photoUrl);
+  int get hashCode =>
+      Object.hash(uid, email, displayName, photoUrl, emailVerified);
 }

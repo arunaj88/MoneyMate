@@ -22,15 +22,15 @@ const deps = {
 
 const owner = {
   uid: 'owner-uid',
-  token: { name: 'Omar', email: 'omar@example.com' },
+  token: { name: 'Omar', email: 'omar@example.com', email_verified: true },
 };
 const partner = {
   uid: 'partner-uid',
-  token: { name: 'Sara', email: 'sara@example.com' },
+  token: { name: 'Sara', email: 'sara@example.com', email_verified: true },
 };
 const stranger = {
   uid: 'stranger-uid',
-  token: { name: 'Eve', email: 'eve@example.com' },
+  token: { name: 'Eve', email: 'eve@example.com', email_verified: true },
 };
 
 async function clear() {
@@ -107,6 +107,22 @@ test.describe('household functions', { skip }, () => {
     await rejects(
       h.createHousehold(db, null, { name: 'X' }, deps),
       'unauthenticated',
+    );
+  });
+
+  test('accounts with an unverified email are refused', async () => {
+    const unverified = {
+      uid: 'new-uid',
+      token: { email: 'new@example.com', email_verified: false },
+    };
+    await rejects(
+      h.createHousehold(db, unverified, { name: 'X' }, deps),
+      'permission-denied',
+    );
+    const noClaim = { uid: 'new-uid', token: { email: 'new@example.com' } };
+    await rejects(
+      h.createHousehold(db, noClaim, { name: 'X' }, deps),
+      'permission-denied',
     );
   });
 

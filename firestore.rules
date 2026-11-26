@@ -38,6 +38,7 @@ rules_version = '2';
 // Budget alerts:  households/{householdId}/budgetAlerts/{alertId}: written once
 //                 by the member whose app first sees a shared budget cross
 //                 a threshold; a Cloud Function pushes it to the others.
+// Verification:   every rule requires a verified email (signedIn()).
 // Membership:     households, members, invitations, users/{uid}/memberships and
 //                 invitationCodes are written only by Cloud Functions (admin),
 //                 so nobody can add themselves to a household, change a role or
@@ -51,8 +52,14 @@ service cloud.firestore {
 
     // ------------------------------------------------------------ helpers
 
+    // Every rule below builds on signedIn(), so all personal, household and
+    // shared financial data needs a verified email address. Google
+    // accounts arrive verified; email/password accounts verify with the
+    // link Firebase Authentication emails them. The claim comes from the
+    // ID token, which clients cannot alter.
     function signedIn() {
-      return request.auth != null;
+      return request.auth != null
+        && request.auth.token.email_verified == true;
     }
 
     function isUser(uid) {

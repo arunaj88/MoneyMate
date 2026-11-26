@@ -4,10 +4,11 @@ import 'package:flutter/material.dart';
 
 import 'package:money_mate/app/account_session.dart';
 import 'package:money_mate/features/auth/screens/login_screen.dart';
+import 'package:money_mate/features/auth/screens/verify_email_screen.dart';
 import 'package:money_mate/providers/auth_provider.dart';
 import 'package:money_mate/app/home_shell.dart';
 
-enum _Destination { login, home }
+enum _Destination { login, verifyEmail, home }
 
 /// Keeps the navigator in step with the authentication state.
 ///
@@ -17,6 +18,10 @@ enum _Destination { login, home }
 /// whenever the state changes later, so after signing out every protected
 /// route — including dialogs and pushed screens — is removed and the back
 /// button cannot return to them.
+///
+/// An account whose email is not verified gets the verification screen as
+/// its only route: the dashboard is never on the stack, and the account's
+/// data is not even opened, until the account is verified.
 class AuthNavigator extends StatefulWidget {
   const AuthNavigator({
     super.key,
@@ -101,9 +106,11 @@ class _AuthNavigatorState extends State<AuthNavigator> {
     if (status == AuthStatus.unknown || !_splashElapsed) return;
     // Signed in, but the account's data is still opening.
     if (status == AuthStatus.authenticated && !widget.session.isReady) return;
-    final target = status == AuthStatus.authenticated
-        ? _Destination.home
-        : _Destination.login;
+    final target = switch (status) {
+      AuthStatus.authenticated => _Destination.home,
+      AuthStatus.verificationRequired => _Destination.verifyEmail,
+      _ => _Destination.login,
+    };
     if (target == _current) return;
     final navigator = widget.navigatorKey.currentState;
     if (navigator == null) {
@@ -120,6 +127,7 @@ class _AuthNavigatorState extends State<AuthNavigator> {
     pageBuilder: (_, _, _) => switch (destination) {
       _Destination.home => const HomeShell(),
       _Destination.login => const LoginScreen(),
+      _Destination.verifyEmail => const VerifyEmailScreen(),
     },
     transitionsBuilder: (_, animation, _, child) =>
         FadeTransition(opacity: animation, child: child),

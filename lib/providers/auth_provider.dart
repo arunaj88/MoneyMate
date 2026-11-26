@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,7 +9,19 @@ import 'package:money_mate/core/services/auth_service.dart';
 import 'package:money_mate/core/services/profile_photo_service.dart';
 import 'package:money_mate/models/app_user.dart';
 
-enum AuthStatus { unknown, authenticated, unauthenticated }
+enum AuthStatus {
+  unknown,
+
+  /// Signed in with a verified email: the app is usable.
+  authenticated,
+
+  /// Signed in with an email address that is not verified yet (email and
+  /// password accounts). Only the verification screen is shown, no
+  /// account data is opened and [AuthProvider.isAuthenticated] is false.
+  verificationRequired,
+
+  unauthenticated,
+}
 
 /// Authentication requests the UI can start. Only one runs at a time.
 enum AuthAction {
@@ -31,12 +44,21 @@ enum AuthAction {
 /// With a [ProfilePhotoService] the user can also change or remove their
 /// profile photo; the cached profile is updated at once so every avatar
 /// shows the new photo.
+///
+/// Email/password accounts must verify their address before they are
+/// [AuthStatus.authenticated]. When such an account signs in (or
+/// registers, or the app restarts signed in) the provider checks Firebase
+/// for a verification done meanwhile and, unless this device already asked
+/// for one recently, has Firebase email a verification link. Google
+/// accounts arrive verified and never see this.
 class AuthProvider extends ChangeNotifier {
   AuthProvider(
     this._service,
     this._preferences, {
     ProfilePhotoService? photoService,
-  }) : _photoService = photoService {
+    DateTime Function()? clock,
+  }) : _photoService = photoService,
+       _clock = clock ?? DateTime.now {
     _subscription = _service.authStateChanges().listen(
       _onAuthStateChanged,
       onError: (Object e) {
@@ -49,6 +71,7 @@ class AuthProvider extends ChangeNotifier {
   final AuthService _service;
   final SharedPreferences _preferences;
   final ProfilePhotoService? _photoService;
+  final DateTime Function() _clock;
   late final StreamSubscription<AppUser?> _subscription;
 
   AuthStatus _status = AuthStatus.unknown;
@@ -59,7 +82,13 @@ class AuthProvider extends ChangeNotifier {
   bool _disposed = false;
 
   AuthStatus get status => _status;
+
+  /// Signed in with a verified email. Account data (and everything that
+  /// reads or syncs it) is only available in this state.
   bool get isAuthenticated => _status == AuthStatus.authenticated;
+
+  /// Signed in, but the email address still has to be verified.
+  bool get needsEmailVerification => _status == AuthStatus.verificationRequired;
   AppUser? get user => _user;
 
   /// True while any auth request is running.
@@ -85,6 +114,7 @@ class AuthProvider extends ChangeNotifier {
       _user = null;
       _status = AuthStatus.unauthenticated;
       unawaited(_preferences.remove(PrefKeys.userProfile));
+      _endVerification();
     } else {
       _setUser(user);
     }
@@ -97,8 +127,15 @@ class AuthProvider extends ChangeNotifier {
 
   void _store(AppUser user) {
     _user = user;
-    _status = AuthStatus.authenticated;
+    _status = user.needsEmailVerification
+        ? AuthStatus.verificationRequired
+        : AuthStatus.authenticated;
     unawaited(_preferences.setString(PrefKeys.userProfile, user.toJson()));
+    if (_status == AuthStatus.verificationRequired) {
+      if (_verificationUid != user.uid) _beginVerification(user);
+    } else {
+      _endVerification();
+    }
   }
 
   /// Applies a photo change: the photo is taken from [updated] as is (so a
@@ -218,6 +255,220 @@ class AuthProvider extends ChangeNotifier {
       );
     }
     return service;
+  }
+
+  // ------------------------------------------------- email verification
+
+  /// Shortest time between two verification emails from this device.
+  static const Duration resendCooldown = Duration(seconds: 60);
+
+  /// A link this device asked for within this time is not sent again
+  /// automatically after a restart (Firebase links stay valid for days).
+  static const Duration _autoResendAfter = Duration(hours: 24);
+
+  /// The account whose verification is in progress.
+  String? _verificationUid;
+  bool _sendingEmail = false;
+  bool _checkingVerification = false;
+  DateTime? _emailSentAt;
+  DateTime? _resendAvailableAt;
+  String? _verificationError;
+  Future<bool>? _checking;
+
+  /// A verification email is being requested.
+  bool get isSendingVerificationEmail => _sendingEmail;
+
+  /// The user asked to check whether the email is verified now.
+  bool get isCheckingVerification => _checkingVerification;
+
+  /// When this device last had a verification email sent, or null.
+  DateTime? get verificationEmailSentAt => _emailSentAt;
+
+  /// When another email may be requested, or null if one may be now.
+  DateTime? get resendAvailableAt => _resendAvailableAt;
+
+  /// Message from the last failed send or check.
+  String? get verificationError => _verificationError;
+
+  /// Whether the resend button may be used now.
+  bool get canResendVerificationEmail {
+    if (!needsEmailVerification || _sendingEmail) return false;
+    final at = _resendAvailableAt;
+    return at == null || !_clock().isBefore(at);
+  }
+
+  bool _isVerifying(String uid) =>
+      !_disposed && needsEmailVerification && _verificationUid == uid;
+
+  void _beginVerification(AppUser user) {
+    _resetVerificationState();
+    _verificationUid = user.uid;
+    final recent = _restoreEmailSent(user);
+    unawaited(_startVerification(user.uid, emailRecentlySent: recent));
+  }
+
+  Future<void> _startVerification(
+    String uid, {
+    required bool emailRecentlySent,
+  }) async {
+    // Picks up a link opened before a restart or on another device, so no
+    // needless email is sent.
+    await refreshVerification();
+    if (!_isVerifying(uid) || emailRecentlySent) return;
+    await _sendEmail();
+  }
+
+  void _endVerification() {
+    if (_verificationUid == null) return;
+    _verificationUid = null;
+    _resetVerificationState();
+    unawaited(_preferences.remove(PrefKeys.verificationEmailSent));
+  }
+
+  void _resetVerificationState() {
+    _emailSentAt = null;
+    _resendAvailableAt = null;
+    _verificationError = null;
+  }
+
+  static String? _normalEmail(AppUser user) => user.email?.trim().toLowerCase();
+
+  /// Restores an email this device asked for recently (after an app
+  /// restart). Returns whether there was one.
+  bool _restoreEmailSent(AppUser user) {
+    final raw = _preferences.getString(PrefKeys.verificationEmailSent);
+    if (raw == null) return false;
+    try {
+      final map = jsonDecode(raw);
+      if (map is! Map ||
+          map['uid'] != user.uid ||
+          map['email'] != _normalEmail(user) ||
+          map['sentAt'] is! int) {
+        return false;
+      }
+      final sentAt = DateTime.fromMillisecondsSinceEpoch(map['sentAt'] as int);
+      final now = _clock();
+      if (sentAt.isAfter(now) || now.difference(sentAt) >= _autoResendAfter) {
+        return false;
+      }
+      _emailSentAt = sentAt;
+      _resendAvailableAt = sentAt.add(resendCooldown);
+      return true;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  /// Emails a new verification link. Returns false while the cooldown runs
+  /// or another email is being requested, so rapid taps send one email.
+  Future<bool> resendVerificationEmail() async {
+    if (!canResendVerificationEmail) return false;
+    return _sendEmail();
+  }
+
+  Future<bool> _sendEmail() async {
+    final user = _user;
+    if (user == null || !_isVerifying(user.uid) || _sendingEmail) {
+      return false;
+    }
+    _sendingEmail = true;
+    _verificationError = null;
+    _notify();
+    try {
+      await _service.sendEmailVerification();
+      if (!_isVerifying(user.uid)) return false;
+      final now = _clock();
+      _emailSentAt = now;
+      _resendAvailableAt = now.add(resendCooldown);
+      unawaited(
+        _preferences.setString(
+          PrefKeys.verificationEmailSent,
+          jsonEncode({
+            'uid': user.uid,
+            'email': _normalEmail(user),
+            'sentAt': now.millisecondsSinceEpoch,
+          }),
+        ),
+      );
+      return true;
+    } on AuthException catch (e) {
+      if (!_isVerifying(user.uid)) return false;
+      _verificationError = e.code == 'too-many-requests'
+          ? 'Too many emails requested. Please wait a few minutes and try '
+                'again.'
+          : e.message;
+      // Firebase limits how often it emails one account.
+      if (e.code == 'too-many-requests') {
+        _resendAvailableAt = _clock().add(resendCooldown);
+      }
+      return false;
+    } catch (e, stack) {
+      debugPrint('Sending the verification email failed: $e\n$stack');
+      if (_isVerifying(user.uid)) {
+        _verificationError = 'Something went wrong. Please try again.';
+      }
+      return false;
+    } finally {
+      _sendingEmail = false;
+      _notify();
+    }
+  }
+
+  /// Checks Firebase now ("I've verified my email"). Returns true, and the
+  /// dashboard opens, once the link has been opened. Otherwise shows why.
+  Future<bool> checkEmailVerified() async {
+    final user = _user;
+    if (user == null || !_isVerifying(user.uid) || _checkingVerification) {
+      return false;
+    }
+    _checkingVerification = true;
+    _verificationError = null;
+    _notify();
+    try {
+      final verified = await _check(quiet: false);
+      if (!verified && _isVerifying(user.uid)) {
+        _verificationError ??=
+            "Your email isn't verified yet. Open the link in the email we "
+            'sent to ${user.email}, then try again.';
+      }
+      return verified;
+    } finally {
+      _checkingVerification = false;
+      _notify();
+    }
+  }
+
+  /// Checks Firebase quietly, e.g. when the app returns to the foreground
+  /// after the user opened the link. Does nothing when offline.
+  Future<void> refreshVerification() async {
+    if (needsEmailVerification) await _check(quiet: true);
+  }
+
+  /// Reloads the account; concurrent checks share one request.
+  Future<bool> _check({required bool quiet}) =>
+      _checking ??= _reload(quiet: quiet).whenComplete(() => _checking = null);
+
+  Future<bool> _reload({required bool quiet}) async {
+    final uid = _verificationUid;
+    if (uid == null) return false;
+    try {
+      final user = await _service.reloadUser();
+      if (user == null || !_isVerifying(uid) || user.uid != uid) return false;
+      _setUser(user);
+      _notify();
+      return !user.needsEmailVerification;
+    } on AuthException catch (e) {
+      // An ended session signs out (the auth stream follows).
+      debugPrint('Checking email verification failed: ${e.code}');
+      if (!quiet && _isVerifying(uid)) _verificationError = e.message;
+      return false;
+    } catch (e) {
+      debugPrint('Checking email verification failed: $e');
+      if (!quiet && _isVerifying(uid)) {
+        _verificationError = 'Something went wrong. Please try again.';
+      }
+      return false;
+    }
   }
 
   void clearError() {

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_mate/app/home_shell.dart';
 import 'package:money_mate/features/auth/screens/login_screen.dart';
+import 'package:money_mate/features/auth/screens/verify_email_screen.dart';
 
 import '../helpers/app_harness.dart';
 import '../helpers/fakes.dart';
@@ -133,7 +134,15 @@ void main() {
     );
     await tapKey(tester, 'submitAuthButton');
 
-    expect(harness.auth.calls, ['register']);
+    // New email/password accounts verify their email first.
+    expect(harness.auth.calls.first, 'register');
+    expect(harness.auth.calls.where((c) => c == 'register'), hasLength(1));
+    expect(find.byType(VerifyEmailScreen), findsOneWidget);
+    expect(find.byType(HomeShell), findsNothing);
+    expect(harness.auth.verificationEmailsSent, 1);
+
+    harness.auth.verifyOnServer();
+    await tapKey(tester, 'checkVerifiedButton');
     expect(find.byType(HomeShell), findsOneWidget);
     expect(
       tester.widget<Text>(find.byKey(const Key('dashboardGreeting'))).data,
@@ -145,7 +154,10 @@ void main() {
     final harness = TestHarness(user: null);
     await harness.pump(tester);
     await tapKey(tester, 'googleSignInButton');
+    // Google accounts are verified: no email, straight to the dashboard.
     expect(harness.auth.calls, ['google']);
+    expect(harness.auth.verificationEmailsSent, 0);
+    expect(find.byType(VerifyEmailScreen), findsNothing);
     expect(find.byType(HomeShell), findsOneWidget);
   });
 
@@ -261,6 +273,9 @@ void main() {
       'secret1',
     );
     await tapKey(tester, 'submitAuthButton');
+    expect(find.byType(VerifyEmailScreen), findsOneWidget);
+    harness.auth.verifyOnServer();
+    await tapKey(tester, 'checkVerifiedButton');
     expect(find.byType(HomeShell), findsOneWidget);
     expect(find.textContaining('Lunch'), findsNothing);
 
