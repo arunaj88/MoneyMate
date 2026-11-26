@@ -48,9 +48,11 @@ enum AuthAction {
 /// Email/password accounts must verify their address before they are
 /// [AuthStatus.authenticated]. When such an account signs in (or
 /// registers, or the app restarts signed in) the provider checks Firebase
-/// for a verification done meanwhile and, unless this device already asked
-/// for one recently, has Firebase email a verification link. Google
-/// accounts arrive verified and never see this.
+/// for a verification done meanwhile, then asks the server whether the
+/// account was created before verification was required (such accounts are
+/// marked verified and go straight in). Otherwise, unless this device
+/// already asked for one recently, Firebase emails a verification link.
+/// Google accounts arrive verified and never see this.
 class AuthProvider extends ChangeNotifier {
   AuthProvider(
     this._service,
@@ -274,6 +276,24 @@ class AuthProvider extends ChangeNotifier {
   DateTime? _resendAvailableAt;
   String? _verificationError;
   Future<bool>? _checking;
+  Future<void>? _checkingAccount;
+
+  /// The server has said whether this account predates verification.
+  bool _accountChecked = false;
+  bool _preparing = false;
+
+  /// Server error codes after which the existing-account check is retried
+  /// on the next check instead of falling back to the email.
+  static const _retryLater = {
+    'unavailable',
+    'deadline-exceeded',
+    'internal',
+    'network-request-failed',
+  };
+
+  /// The account is being checked (verified elsewhere? created before
+  /// verification was required?) before any email is sent.
+  bool get isPreparingVerification => _preparing;
 
   /// A verification email is being requested.
   bool get isSendingVerificationEmail => _sendingEmail;
@@ -303,19 +323,52 @@ class AuthProvider extends ChangeNotifier {
   void _beginVerification(AppUser user) {
     _resetVerificationState();
     _verificationUid = user.uid;
-    final recent = _restoreEmailSent(user);
-    unawaited(_startVerification(user.uid, emailRecentlySent: recent));
+    _restoreEmailSent(user);
+    _preparing = true;
+    unawaited(_startVerification(user.uid));
   }
 
-  Future<void> _startVerification(
-    String uid, {
-    required bool emailRecentlySent,
-  }) async {
-    // Picks up a link opened before a restart or on another device, so no
-    // needless email is sent.
-    await refreshVerification();
-    if (!_isVerifying(uid) || emailRecentlySent) return;
-    await _sendEmail();
+  Future<void> _startVerification(String uid) async {
+    try {
+      await refreshVerification();
+    } finally {
+      if (_verificationUid == uid && _preparing) {
+        _preparing = false;
+        _notify();
+      }
+    }
+  }
+
+  /// Accounts created before verification was required are marked verified
+  /// by the server and never get an email. For newer accounts the link is
+  /// emailed, unless this device asked for one recently.
+  Future<void> _checkExistingAccount(String uid) => _checkingAccount ??=
+      _exemptOrSendEmail(uid).whenComplete(() => _checkingAccount = null);
+
+  Future<void> _exemptOrSendEmail(String uid) async {
+    try {
+      final exempt = await _service.exemptExistingAccount();
+      if (!_isVerifying(uid)) return;
+      _accountChecked = true;
+      if (exempt) {
+        await _check(quiet: true);
+        return;
+      }
+    } on AuthException catch (e) {
+      if (!_isVerifying(uid)) return;
+      if (e.code == 'unauthenticated') {
+        unawaited(signOut());
+        return;
+      }
+      // Offline: try again on the next check rather than emailing an
+      // account that may not need it.
+      if (_retryLater.contains(e.code)) return;
+      _accountChecked = true;
+    } catch (e) {
+      debugPrint('Existing-account check failed: $e');
+      return;
+    }
+    if (_isVerifying(uid) && _emailSentAt == null) await _sendEmail();
   }
 
   void _endVerification() {
@@ -329,6 +382,8 @@ class AuthProvider extends ChangeNotifier {
     _emailSentAt = null;
     _resendAvailableAt = null;
     _verificationError = null;
+    _accountChecked = false;
+    _preparing = false;
   }
 
   static String? _normalEmail(AppUser user) => user.email?.trim().toLowerCase();
@@ -441,7 +496,11 @@ class AuthProvider extends ChangeNotifier {
   /// Checks Firebase quietly, e.g. when the app returns to the foreground
   /// after the user opened the link. Does nothing when offline.
   Future<void> refreshVerification() async {
-    if (needsEmailVerification) await _check(quiet: true);
+    final uid = _verificationUid;
+    if (!needsEmailVerification || uid == null) return;
+    // Picks up a link opened before a restart or on another device.
+    if (await _check(quiet: true)) return;
+    if (_isVerifying(uid) && !_accountChecked) await _checkExistingAccount(uid);
   }
 
   /// Reloads the account; concurrent checks share one request.

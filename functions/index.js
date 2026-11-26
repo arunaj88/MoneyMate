@@ -22,6 +22,7 @@ const {
 const { setGlobalOptions } = require('firebase-functions/v2');
 const logger = require('firebase-functions/logger');
 
+const accounts = require('./src/accounts');
 const households = require('./src/households');
 const notifications = require('./src/notifications');
 const { ValidationError } = require('./src/logic');
@@ -33,6 +34,7 @@ const deps = {
   now: () => Date.now(),
   randomBytes: (n) => crypto.randomBytes(n),
   getUser: (uid) => getAuth().getUser(uid),
+  updateUser: (uid, props) => getAuth().updateUser(uid, props),
 };
 
 /** Wraps a handler as a callable function with consistent errors. */
@@ -83,6 +85,12 @@ exports.transferOwnership = callable(
   households.transferOwnership,
 );
 exports.deleteHousehold = callable('deleteHousehold', households.deleteHousehold);
+
+// Accounts created before email verification was required skip it.
+exports.exemptExistingAccount = callable(
+  'exemptExistingAccount',
+  accounts.exemptExistingAccount,
+);
 
 // ------------------------------------------------------ push notifications
 

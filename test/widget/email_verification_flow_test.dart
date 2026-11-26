@@ -131,6 +131,17 @@ void main() {
     expect(find.byType(LoginScreen), findsOneWidget);
   });
 
+  testWidgets('existing unverified accounts open the dashboard directly', (
+    tester,
+  ) async {
+    final harness = TestHarness(user: unverified);
+    harness.auth.existingAccount = true;
+    await harness.pump(tester);
+    expect(find.byType(HomeShell), findsOneWidget);
+    expect(find.byType(VerifyEmailScreen), findsNothing);
+    expect(harness.auth.verificationEmailsSent, 0);
+  });
+
   testWidgets('verified accounts never see the verification screen', (
     tester,
   ) async {

@@ -132,88 +132,126 @@ class _VerifyEmailScreenState extends State<VerifyEmailScreen>
               ),
             ),
             Expanded(
-              child: Center(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(
-                    Spacing.xl,
-                    0,
-                    Spacing.xl,
-                    Spacing.xl,
-                  ),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 420),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Center(child: AppLogo(size: 64)),
-                        const SizedBox(height: Spacing.lg),
-                        Text(
-                          'Verify Your Email',
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
+              // Existing accounts are let in without an email; until the
+              // account is checked, nothing about an email is shown.
+              child: auth.isPreparingVerification || entering
+                  ? const _Preparing()
+                  : Center(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(
+                          Spacing.xl,
+                          0,
+                          Spacing.xl,
+                          Spacing.xl,
+                        ),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 420),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              const Center(child: AppLogo(size: 64)),
+                              const SizedBox(height: Spacing.lg),
+                              Text(
+                                'Verify Your Email',
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: Spacing.sm),
+                              Text(
+                                'We sent a verification link to',
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(height: Spacing.xs),
+                              Text(
+                                email,
+                                key: const Key('verifyEmailAddress'),
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: Spacing.xl),
+                              _Steps(scheme: scheme, theme: theme),
+                              const SizedBox(height: Spacing.lg),
+                              if (error != null) ...[
+                                _ErrorLine(message: error),
+                                const SizedBox(height: Spacing.md),
+                              ],
+                              FilledButton(
+                                key: const Key('checkVerifiedButton'),
+                                onPressed: busy ? null : _check,
+                                child: checking
+                                    ? const SizedBox.square(
+                                        dimension: 22,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.5,
+                                        ),
+                                      )
+                                    : const Text("I've verified my email"),
+                              ),
+                              const SizedBox(height: Spacing.md),
+                              _ResendRow(
+                                auth: auth,
+                                busy: busy,
+                                onResend: _resend,
+                              ),
+                              const SizedBox(height: Spacing.sm),
+                              Text(
+                                "Can't find it? Check your spam or junk folder.",
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(height: Spacing.lg),
+                              TextButton(
+                                key: const Key('useDifferentEmailButton'),
+                                onPressed: busy ? null : _useDifferentEmail,
+                                child: const Text('Use a different email'),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: Spacing.sm),
-                        Text(
-                          'We sent a verification link to',
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: Spacing.xs),
-                        Text(
-                          email,
-                          key: const Key('verifyEmailAddress'),
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: Spacing.xl),
-                        _Steps(scheme: scheme, theme: theme),
-                        const SizedBox(height: Spacing.lg),
-                        if (error != null) ...[
-                          _ErrorLine(message: error),
-                          const SizedBox(height: Spacing.md),
-                        ],
-                        FilledButton(
-                          key: const Key('checkVerifiedButton'),
-                          onPressed: busy ? null : _check,
-                          child: checking
-                              ? const SizedBox.square(
-                                  dimension: 22,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.5,
-                                  ),
-                                )
-                              : const Text("I've verified my email"),
-                        ),
-                        const SizedBox(height: Spacing.md),
-                        _ResendRow(auth: auth, busy: busy, onResend: _resend),
-                        const SizedBox(height: Spacing.sm),
-                        Text(
-                          "Can't find it? Check your spam or junk folder.",
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                        const SizedBox(height: Spacing.lg),
-                        TextButton(
-                          key: const Key('useDifferentEmailButton'),
-                          onPressed: busy ? null : _useDifferentEmail,
-                          child: const Text('Use a different email'),
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-              ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _Preparing extends StatelessWidget {
+  const _Preparing();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      key: const Key('verifyPreparing'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const AppLogo(size: 64),
+          const SizedBox(height: Spacing.xl),
+          const SizedBox.square(
+            dimension: 28,
+            child: CircularProgressIndicator(strokeWidth: 3),
+          ),
+          const SizedBox(height: Spacing.lg),
+          Text(
+            'Checking your account…',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
       ),
     );
   }

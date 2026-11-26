@@ -17,7 +17,7 @@ SQLite database, and transactions are synchronised with **Cloud Firestore**
 | **Households** | Partners each sign in with their own account, keep **private personal finances** and share a **household**: shared transactions (with who added them), shared weekly/monthly and category budgets, synced to every member's devices. Create a household, invite with a one-time code (optionally bound to an email, expires after 7 days), accept, remove members, transfer ownership, leave or delete. |
 | **Personal / Shared / Combined** | One app-wide switch for the dashboard, transaction list and reports. Combined totals count every transaction exactly once. |
 | **Cloud sync** | Two-way sync of transactions, budgets and categories with Firestore, automatic whenever connectivity is available, with a visible status (Synced, Syncing, Offline, Pending, Failed) and the last successful sync time. The device keeps the latest **90 days** of transactions; the cloud keeps the complete history, which history and reports load on request. |
-| **Sign-in** | Email/password (the address is verified with Firebase's verification link before the app opens) and Google sign-in (already verified, no email). |
+| **Sign-in** | Email/password (new accounts verify their address with Firebase's verification link before the app opens; existing accounts are not asked) and Google sign-in (already verified, no email). |
 | **Settings** | Currency, light/dark/system theme, first day of the week, notification toggles, custom categories, JSON backup/restore, CSV export and app information. |
 
 ## Tech stack
@@ -217,8 +217,12 @@ token. Google accounts arrive verified.
   `firebase deploy --only firestore:rules,storage,functions`.
 * Optional: edit the email's text and sender name in the Firebase console
   under *Authentication → Templates → Email address verification*.
-* Existing email/password accounts that were never verified see the
-  verification screen on their next start; their data is untouched.
+* Only **new** accounts verify. Accounts created before
+  `VERIFICATION_REQUIRED_FROM` (in `functions/src/accounts.js`, set it to
+  your release date) are marked verified by the `exemptExistingAccount`
+  Cloud Function the first time they open the updated app, using the
+  creation time Firebase Authentication records, so they go straight to
+  the dashboard and get no email.
 
 ## Tests
 

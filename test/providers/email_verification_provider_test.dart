@@ -224,6 +224,71 @@ void main() {
     s.provider.dispose();
   });
 
+  test(
+    'accounts from before verification go straight in, with no email',
+    () async {
+      final s = await setup(
+        signedIn: unverified,
+        configure: (service) => service.existingAccount = true,
+      );
+      expect(s.provider.status, AuthStatus.authenticated);
+      expect(s.provider.user!.emailVerified, isTrue);
+      expect(s.service.calls, contains('exempt'));
+      expect(s.service.verificationEmailsSent, 0);
+      s.provider.dispose();
+    },
+  );
+
+  test('new accounts are checked first, then get the email', () async {
+    final s = await setup(signedIn: unverified);
+    final calls = s.service.calls;
+    expect(
+      calls.indexOf('exempt'),
+      lessThan(calls.indexOf('sendVerification')),
+    );
+    expect(s.provider.isPreparingVerification, isFalse);
+    expect(s.service.verificationEmailsSent, 1);
+    s.provider.dispose();
+  });
+
+  test('offline, no email is sent until the account can be checked', () async {
+    final s = await setup(
+      signedIn: unverified,
+      configure: (service) {
+        service.existingAccount = true;
+        service.exemptError = const AuthException(
+          'No internet connection.',
+          code: 'unavailable',
+        );
+      },
+    );
+    expect(s.provider.status, AuthStatus.verificationRequired);
+    expect(s.provider.isPreparingVerification, isFalse);
+    expect(s.service.verificationEmailsSent, 0);
+
+    // Back online: the next check (resume, poll) lets the account in.
+    await s.provider.refreshVerification();
+    expect(s.provider.status, AuthStatus.authenticated);
+    expect(s.service.verificationEmailsSent, 0);
+    s.provider.dispose();
+  });
+
+  test(
+    'if the check is unavailable on the server, the email is sent',
+    () async {
+      final s = await setup(
+        signedIn: unverified,
+        configure: (service) => service.exemptError = const AuthException(
+          'Not available.',
+          code: 'not-found',
+        ),
+      );
+      expect(s.provider.status, AuthStatus.verificationRequired);
+      expect(s.service.verificationEmailsSent, 1);
+      s.provider.dispose();
+    },
+  );
+
   test('verified Google accounts never get a verification email', () async {
     final s = await setup();
     expect(await s.provider.signInWithGoogle(), isTrue);

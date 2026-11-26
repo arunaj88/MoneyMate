@@ -441,6 +441,27 @@ class FakeAuthService implements AuthService {
   /// the app sees it only after a reload.
   void verifyOnServer() => _verifiedOnServer = true;
 
+  /// The signed-in account was created before verification was required,
+  /// so the server exempts it.
+  bool existingAccount = false;
+
+  /// Thrown (once) by the next [exemptExistingAccount].
+  AuthException? exemptError;
+
+  @override
+  Future<bool> exemptExistingAccount() async {
+    calls.add('exempt');
+    await _wait();
+    final error = exemptError;
+    if (error != null) {
+      exemptError = null;
+      throw error;
+    }
+    if (!existingAccount) return false;
+    verifyOnServer();
+    return true;
+  }
+
   @override
   Future<void> sendEmailVerification() async {
     calls.add('sendVerification');

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -49,6 +50,12 @@ abstract class AuthService {
   /// address. Tapping it marks the account verified.
   Future<void> sendEmailVerification();
 
+  /// Asks the server to skip verification for an account created before
+  /// email verification was required. Returns true when the account is now
+  /// verified (call [reloadUser]); false for newer accounts, which must
+  /// verify. Throws an [AuthException] when the server cannot be reached.
+  Future<bool> exemptExistingAccount();
+
   /// Fetches the signed-in account from the server (picking up an email
   /// verified meanwhile, from any device) and refreshes its ID token so the
   /// security rules see the current `email_verified` claim. Returns null
@@ -60,13 +67,21 @@ abstract class AuthService {
 
 /// [AuthService] backed by Firebase Authentication and Google Sign-In.
 class FirebaseAuthService implements AuthService {
-  FirebaseAuthService({FirebaseAuth? auth, GoogleSignIn? googleSignIn})
-    : _auth = auth ?? FirebaseAuth.instance,
-      _googleSignIn = googleSignIn ?? GoogleSignIn.instance;
+  FirebaseAuthService({
+    FirebaseAuth? auth,
+    GoogleSignIn? googleSignIn,
+    FirebaseFunctions? functions,
+  }) : _auth = auth ?? FirebaseAuth.instance,
+       _googleSignIn = googleSignIn ?? GoogleSignIn.instance,
+       _functionsOverride = functions;
 
   final FirebaseAuth _auth;
   final GoogleSignIn _googleSignIn;
+  final FirebaseFunctions? _functionsOverride;
   Future<void>? _googleInit;
+
+  FirebaseFunctions get _functions =>
+      _functionsOverride ?? FirebaseFunctions.instance;
 
   /// Firebase error codes meaning the saved sign-in is no longer valid.
   static const _sessionEnded = {
@@ -175,6 +190,34 @@ class FirebaseAuthService implements AuthService {
     if (user == null) throw _sessionExpired;
     await user.sendEmailVerification();
   });
+
+  @override
+  Future<bool> exemptExistingAccount() async {
+    try {
+      final result = await _functions
+          .httpsCallable(
+            'exemptExistingAccount',
+            options: HttpsCallableOptions(timeout: const Duration(seconds: 20)),
+          )
+          .call<Object?>();
+      final data = result.data;
+      final status = data is Map ? data['status'] : null;
+      return status == 'exempted' || status == 'verified';
+    } on FirebaseFunctionsException catch (e) {
+      debugPrint('exemptExistingAccount failed: ${e.code}');
+      throw AuthException(
+        e.code == 'unauthenticated'
+            ? 'Your session has expired. Please sign in again.'
+            : firebaseAuthMessage('network-request-failed'),
+        code: e.code,
+      );
+    } on TimeoutException {
+      throw AuthException(
+        firebaseAuthMessage('network-request-failed'),
+        code: 'deadline-exceeded',
+      );
+    }
+  }
 
   @override
   Future<AppUser?> reloadUser() => _guard(() async {
