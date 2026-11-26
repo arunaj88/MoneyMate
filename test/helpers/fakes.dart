@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:async';
 
 import 'package:money_mate/core/services/auth_service.dart';
@@ -280,8 +281,12 @@ class FakeBackupService implements BackupService {
       '{}';
 
   @override
-  Future<String> createTransactionsCsv({required String currencyCode}) async =>
-      '';
+  Future<Uint8List> createTransactionsWorkbook({
+    required ViewScope view,
+    String? householdId,
+    String? householdName,
+    required String currencyCode,
+  }) async => Uint8List(0);
 
   @override
   Future<void> restore(BackupContents contents) async {}

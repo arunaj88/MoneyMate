@@ -15,7 +15,8 @@ import 'package:money_mate/repositories/savings_repository.dart';
 import 'package:money_mate/providers/auth_provider.dart';
 import 'package:money_mate/providers/transaction_provider.dart';
 
-export 'package:money_mate/repositories/savings_repository.dart' show SavingsException;
+export 'package:money_mate/repositories/savings_repository.dart'
+    show SavingsException;
 
 /// Savings goals of all three kinds, their history and (for independent
 /// shared goals) members and invitations.

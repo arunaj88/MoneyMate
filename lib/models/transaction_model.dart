@@ -1,6 +1,7 @@
 import 'package:money_mate/models/scope_models.dart';
 
-export 'package:money_mate/models/scope_models.dart' show TransactionScope, ScopeFilter;
+export 'package:money_mate/models/scope_models.dart'
+    show TransactionScope, ScopeFilter;
 
 /// Whether a transaction adds money (income) or spends it (expense).
 enum TransactionType {

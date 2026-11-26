@@ -416,9 +416,11 @@ class SettingsScreen extends StatelessWidget {
               ),
               ListTile(
                 leading: const Icon(Icons.table_chart_outlined),
-                title: const Text('Export transactions (CSV)'),
-                subtitle: const Text('Open in Excel, Sheets or Numbers'),
-                onTap: data.exportCsv,
+                title: const Text('Export transactions (Excel)'),
+                subtitle: const Text(
+                  'Formatted sheet for Excel, Google Sheets or Numbers',
+                ),
+                onTap: data.exportTransactions,
               ),
             ],
           ),

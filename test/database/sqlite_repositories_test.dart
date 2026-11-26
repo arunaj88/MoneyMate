@@ -1,11 +1,13 @@
 import 'dart:convert';
 
+import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:money_mate/core/database/app_database.dart';
 import 'package:money_mate/core/services/backup_service.dart';
 import 'package:money_mate/core/utils/date_range.dart';
 import 'package:money_mate/models/budget_model.dart';
 import 'package:money_mate/models/category_model.dart';
+import 'package:money_mate/models/scope_models.dart';
 import 'package:money_mate/models/transaction_model.dart';
 import 'package:money_mate/repositories/budget_repository.dart';
 import 'package:money_mate/repositories/category_repository.dart';
@@ -351,27 +353,70 @@ void main() {
       );
     });
 
-    test('CSV export escapes values', () async {
+    test('transactions export holds only the chosen scope', () async {
       final service = SqliteBackupService(db);
       await transactions.insert(
         tx(
           id: 't1',
           amountMinor: 1234,
           date: DateTime(2026, 11, 5),
-          note: 'Comma, "quote"',
+          note: 'Lunch & <coffee>',
         ),
       );
-      final csv = await service.createTransactionsCsv(currencyCode: 'AED');
-      final lines = const LineSplitter().convert(csv);
-      expect(
-        lines.first,
-        'Date,Type,Category,Amount,Currency,Payment Method,Note,Scope,Added By',
+      await transactions.insert(
+        tx(
+          id: 't2',
+          amountMinor: 5000,
+          date: DateTime(2026, 11, 6),
+          note: 'Shared groceries',
+          householdId: 'h1',
+        ),
       );
-      expect(
-        lines[1],
-        '2026-11-05,Expense,Food,-12.34,AED,Cash,"Comma, ""quote""",Personal,',
+      await transactions.insert(
+        tx(
+          id: 't3',
+          amountMinor: 700,
+          date: DateTime(2026, 11, 7),
+          note: 'Old household',
+          householdId: 'h-old',
+        ),
       );
-      expect(BackupService.buildCsvRow(['=SUM(A1)']), "'=SUM(A1)");
+
+      Future<String> sheetOf(ViewScope view) async {
+        final bytes = await service.createTransactionsWorkbook(
+          view: view,
+          householdId: 'h1',
+          householdName: 'Our Home',
+          currencyCode: 'AED',
+        );
+        return utf8.decode(
+          ZipDecoder()
+              .decodeBytes(bytes)
+              .findFile('xl/worksheets/sheet1.xml')!
+              .content,
+        );
+      }
+
+      final personal = await sheetOf(ViewScope.personal);
+      expect(personal, contains('Personal transactions'));
+      expect(personal, contains('Lunch &amp; &lt;coffee&gt;'));
+      expect(personal, contains('<t xml:space="preserve">Food</t>'));
+      expect(personal, contains('<v>-12.34</v>'));
+      expect(personal, isNot(contains('Shared groceries')));
+
+      final household = await sheetOf(ViewScope.shared);
+      expect(household, contains('Household transactions · Our Home'));
+      expect(household, contains('Shared groceries'));
+      expect(household, isNot(contains('Lunch')));
+      expect(household, isNot(contains('Old household')));
+
+      expect(
+        () => service.createTransactionsWorkbook(
+          view: ViewScope.shared,
+          currencyCode: 'AED',
+        ),
+        throwsArgumentError,
+      );
     });
   });
 }

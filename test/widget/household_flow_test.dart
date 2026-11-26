@@ -267,4 +267,61 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Households are not available'), findsOneWidget);
   });
+
+  testWidgets('transaction export asks for personal or household', (
+    tester,
+  ) async {
+    Future<void> openExport() async {
+      await openTab(tester, 'Settings');
+      await tester.scrollUntilVisible(
+        find.text('Export transactions (Excel)'),
+        200,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.ensureVisible(find.text('Export transactions (Excel)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Export transactions (Excel)'));
+      await tester.pumpAndSettle();
+    }
+
+    final households = FakeHouseholdService(uid: testUser.uid);
+    await households.createHousehold('Khan family');
+    await TestHarness(households: households).pump(tester);
+    await openExport();
+
+    expect(find.byKey(const Key('exportScopeSelector')), findsOneWidget);
+    String hint() =>
+        tester.widget<Text>(find.byKey(const Key('exportScopeHint'))).data!;
+    expect(hint(), startsWith('Only your personal transactions.'));
+
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('exportScopeSelector')),
+        matching: find.text('Household'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(hint(), contains('shared transactions of Khan family'));
+    expect(find.byKey(const Key('exportShareTile')), findsOneWidget);
+  });
+
+  testWidgets('without a household the export is clearly personal', (
+    tester,
+  ) async {
+    final households = FakeHouseholdService(uid: testUser.uid);
+    await TestHarness(households: households).pump(tester);
+    await openTab(tester, 'Settings');
+    await tester.scrollUntilVisible(
+      find.text('Export transactions (Excel)'),
+      200,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.ensureVisible(find.text('Export transactions (Excel)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Export transactions (Excel)'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('exportScopeSelector')), findsNothing);
+    expect(find.text('Your personal transactions.'), findsOneWidget);
+  });
 }

@@ -285,22 +285,19 @@ void main() {
       relaunched.dispose();
     });
 
-    test(
-      'a saved view from an older version is ignored and removed',
-      () async {
-        await prefs.setString(PrefKeys.viewScope, 'shared');
-        final restored = TransactionScopeProvider(prefs);
-        await household.createHousehold('Home');
-        await settle();
-        restored.updateHousehold(household);
-        await settle();
-        expect(restored.view, ViewScope.personal);
-        expect(restored.filter, const ScopeFilter.personal());
-        expect(prefs.containsKey(PrefKeys.viewScope), isFalse);
-        expect(ViewScope.values.map((v) => v.label), ['Personal', 'Household']);
-        restored.dispose();
-      },
-    );
+    test('a saved view from an older version is ignored and removed', () async {
+      await prefs.setString(PrefKeys.viewScope, 'shared');
+      final restored = TransactionScopeProvider(prefs);
+      await household.createHousehold('Home');
+      await settle();
+      restored.updateHousehold(household);
+      await settle();
+      expect(restored.view, ViewScope.personal);
+      expect(restored.filter, const ScopeFilter.personal());
+      expect(prefs.containsKey(PrefKeys.viewScope), isFalse);
+      expect(ViewScope.values.map((v) => v.label), ['Personal', 'Household']);
+      restored.dispose();
+    });
   });
 
   group('request state', () {

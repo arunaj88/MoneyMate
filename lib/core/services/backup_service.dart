@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:intl/intl.dart';
 import 'package:sqflite/sqflite.dart';
@@ -7,10 +8,11 @@ import 'package:money_mate/models/budget_model.dart';
 import 'package:money_mate/models/category_model.dart';
 import 'package:money_mate/models/recurring_model.dart';
 import 'package:money_mate/models/savings_model.dart';
+import 'package:money_mate/models/scope_models.dart';
 import 'package:money_mate/models/transaction_model.dart';
 import 'package:money_mate/core/constants/app_constants.dart';
 import 'package:money_mate/core/database/app_database.dart';
-import 'package:money_mate/core/utils/money.dart';
+import 'package:money_mate/core/services/transactions_workbook.dart';
 
 /// Thrown when a backup file cannot be restored.
 class BackupFormatException implements Exception {
@@ -52,15 +54,22 @@ class BackupContents {
   final List<SavingsEntry> savingsEntries;
 }
 
-/// Creates and restores JSON backups and exports CSV files.
+/// Creates and restores JSON backups and exports the transactions
+/// spreadsheet.
 abstract class BackupService {
   /// Serialises the user's personal data to a JSON document. Shared
   /// household records belong to the household and are not included.
   Future<String> createBackupJson({Map<String, Object>? settings});
 
-  /// Exports the transactions stored on this device as CSV (newest first),
-  /// with their scope and, for shared ones, who added them.
-  Future<String> createTransactionsCsv({required String currencyCode});
+  /// Exports the transactions of one scope stored on this device as a
+  /// formatted Excel workbook (see [TransactionsWorkbook]): personal ones,
+  /// or [householdId]'s shared ones when [view] is [ViewScope.shared].
+  Future<Uint8List> createTransactionsWorkbook({
+    required ViewScope view,
+    String? householdId,
+    String? householdName,
+    required String currencyCode,
+  });
 
   /// Replaces the personal data stored on this device with [contents]
   /// atomically. Shared household data is left untouched, and everything
@@ -69,23 +78,6 @@ abstract class BackupService {
 
   static String backupFileName(DateTime now) =>
       'moneymate_backup_${DateFormat('yyyyMMdd_HHmmss').format(now)}.json';
-
-  static String csvFileName(DateTime now) =>
-      'moneymate_transactions_${DateFormat('yyyyMMdd_HHmmss').format(now)}.csv';
-
-  /// Escapes values per RFC 4180 and guards against spreadsheet formula
-  /// injection for text cells.
-  static String buildCsvRow(List<String> values) {
-    return values
-        .map((value) {
-          var v = value;
-          if (v.isNotEmpty && '=+@'.contains(v[0])) v = "'$v";
-          final needsQuotes = v.contains(RegExp(r'[",\r\n]'));
-          v = v.replaceAll('"', '""');
-          return needsQuotes ? '"$v"' : v;
-        })
-        .join(',');
-  }
 
   /// Parses and validates a backup without changing any data.
   static BackupContents parse(String jsonText) {
@@ -318,44 +310,36 @@ class SqliteBackupService implements BackupService {
   }
 
   @override
-  Future<String> createTransactionsCsv({required String currencyCode}) async {
+  Future<Uint8List> createTransactionsWorkbook({
+    required ViewScope view,
+    String? householdId,
+    String? householdName,
+    required String currencyCode,
+  }) async {
+    if (view == ViewScope.shared && householdId == null) {
+      throw ArgumentError('A household export needs a household');
+    }
+    final scope = ScopeFilter.forView(view, householdId).sql('t');
     final rows = await _db.rawQuery(
       'SELECT t.*, c.name AS category_name FROM ${Tables.transactions} t '
       'LEFT JOIN ${Tables.categories} c ON c.id = t.category_id '
+      'WHERE ${scope.sql} '
       'ORDER BY t.date DESC, t.created_at DESC',
+      scope.args,
     );
-    final dateFormat = DateFormat('yyyy-MM-dd');
-    final buffer = StringBuffer()
-      ..writeln(
-        BackupService.buildCsvRow([
-          'Date',
-          'Type',
-          'Category',
-          'Amount',
-          'Currency',
-          'Payment Method',
-          'Note',
-          'Scope',
-          'Added By',
-        ]),
-      );
-    for (final r in rows) {
-      final t = TransactionModel.fromMap(r);
-      buffer.writeln(
-        BackupService.buildCsvRow([
-          dateFormat.format(t.date),
-          t.type.label,
-          (r['category_name'] as String?) ?? 'Unknown',
-          '${t.isExpense ? '-' : ''}${Money.toInputString(t.amountMinor)}',
-          currencyCode,
-          t.paymentMethod.label,
-          t.note,
-          t.isShared ? 'Shared' : 'Personal',
-          t.isShared ? (t.createdByName ?? '') : '',
-        ]),
-      );
-    }
-    return buffer.toString();
+    return TransactionsWorkbook.build(
+      view: view,
+      householdName: householdName,
+      transactions: [
+        for (final r in rows)
+          ExportTransaction.from(
+            TransactionModel.fromMap(r),
+            categoryName: r['category_name'] as String?,
+          ),
+      ],
+      currencyCode: currencyCode,
+      exportedAt: DateTime.now(),
+    );
   }
 
   /// Runs in a single database transaction: if anything fails, the

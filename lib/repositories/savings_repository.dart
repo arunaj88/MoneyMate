@@ -6,7 +6,8 @@ import 'package:money_mate/core/services/cloud_savings_store.dart';
 import 'package:money_mate/models/savings_model.dart';
 import 'package:money_mate/models/sync_models.dart';
 
-export 'package:money_mate/core/services/cloud_savings_store.dart' show SavingsException;
+export 'package:money_mate/core/services/cloud_savings_store.dart'
+    show SavingsException;
 
 /// Storage of savings goals, their history and (for shared goals) members
 /// and invitations.

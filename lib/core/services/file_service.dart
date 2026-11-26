@@ -17,14 +17,13 @@ class FileService {
 
   bool get _isMobile => Platform.isAndroid || Platform.isIOS;
 
-  /// Lets the user choose where to save [content]. Returns the saved path,
+  /// Lets the user choose where to save [bytes]. Returns the saved path,
   /// or null if the user cancelled.
   Future<String?> saveToDevice({
     required String fileName,
-    required String content,
+    required Uint8List bytes,
     required String extension,
   }) async {
-    final bytes = Uint8List.fromList(utf8.encode(content));
     final path = await FilePicker.saveFile(
       dialogTitle: 'Save $fileName',
       fileName: fileName,
@@ -38,20 +37,6 @@ class FileService {
       await File(path).writeAsBytes(bytes, flush: true);
     }
     return path;
-  }
-
-  /// Writes [content] to a temporary file and opens the share sheet.
-  Future<void> share({
-    required String fileName,
-    required String content,
-    String? subject,
-  }) async {
-    final dir = await getTemporaryDirectory();
-    final file = File(p.join(dir.path, fileName));
-    await file.writeAsString(content, flush: true);
-    await SharePlus.instance.share(
-      ShareParams(files: [XFile(file.path)], subject: subject, title: subject),
-    );
   }
 
   /// Writes [bytes] to a temporary file and opens the share sheet with it.

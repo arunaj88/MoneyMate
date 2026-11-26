@@ -3,7 +3,8 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
-import 'package:money_mate/core/services/cloud_transaction_store.dart' show CloudPaths;
+import 'package:money_mate/core/services/cloud_transaction_store.dart'
+    show CloudPaths;
 
 /// What this installation tells the Cloud Functions about itself, stored
 /// at users/{uid}/devices/{deviceId}.

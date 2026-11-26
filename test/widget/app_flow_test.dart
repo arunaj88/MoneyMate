@@ -208,13 +208,13 @@ void main() {
     expect(app.themeMode, ThemeMode.dark);
 
     await tester.scrollUntilVisible(
-      find.text('Export transactions (CSV)'),
+      find.text('Export transactions (Excel)'),
       200,
       scrollable: find.byType(Scrollable).last,
     );
     expect(find.text('Back up data'), findsOneWidget);
     expect(find.text('Restore from backup'), findsOneWidget);
-    expect(find.text('Export transactions (CSV)'), findsOneWidget);
+    expect(find.text('Export transactions (Excel)'), findsOneWidget);
   });
 
   testWidgets('dashboard header: text column takes all the free width', (
